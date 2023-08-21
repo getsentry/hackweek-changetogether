@@ -27,5 +27,5 @@ jobs:
     - name: Archive build artifacts
       uses: actions/upload-artifact@v2
       with:
-        name: my_program
+        name: change-together
         path: target/release/hackweek-changetogether
