@@ -1,6 +1,6 @@
 use std::{path::PathBuf, collections::HashSet};
 
-use anyhow::{anyhow, Error};
+use anyhow::Error;
 use git2::Commit;
 
 /// Describes a commit-message level `CHANGE_TOGETHER_IGNORE` statement.

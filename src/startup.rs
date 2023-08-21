@@ -1,11 +1,9 @@
 extern crate git2;
 
-use git2::{Repository};
+use anyhow::{Error, Context};
+use git2::Repository;
 
-pub fn clone_repo(repo: String) {
+pub fn clone_repo(repo: String) -> Result<Repository, Error> {
     let url = format!("https://github.com/{}", repo);
-    let repo = match Repository::clone(&url, format!("/tmp/{}", repo)) {
-        Ok(repo) => repo,
-        Err(e) => panic!("failed to clone: {}", e),
-    };
+    Repository::clone(&url, format!("/tmp/{}", repo)).context("failed to clone")
 }

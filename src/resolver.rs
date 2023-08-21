@@ -23,6 +23,6 @@ pub(crate) struct ResolvedSpec<'a> {
     links: HashSet<BlobSegment<'a>>,
 }
 
-pub(crate) fn resolve<'a>(specs: Vec<ParsedSpec>) -> Result<Vec<ResolvedSpec<'a>, Error>> {
+pub(crate) fn resolve<'a>(specs: Vec<ParsedSpec>) -> Result<Vec<ResolvedSpec<'a>>, Error> {
     todo!()
 }
