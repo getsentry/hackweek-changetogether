@@ -2,7 +2,7 @@ name: "CI for checking file changes"
 inputs:
   repo:
     required: true
-  commit_sha:
+  target_sha:
     required: true
   base_sha:
     required: true
@@ -18,4 +18,4 @@ steps:
     - name: Run Rust program
       run: |
         chmod +x change-together
-        ./change-together -- --repo ${{ inputs.repo }} --commit_sha ${{ inputs.commit_sha }} --base_sha ${{ inputs.base_sha }}
+        ./change-together -- --repo ${{ inputs.repo }} --target_sha ${{ inputs.target_sha }} --base_sha ${{ inputs.base_sha }}
