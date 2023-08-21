@@ -1,14 +1,16 @@
 use structopt::StructOpt;
 
+mod startup;
+
 #[derive(StructOpt, Debug)]
 struct Cli {
     #[structopt(long = "repo")]
     repo: String,
 
-    #[structopt(long = "commitSHA")]
+    #[structopt(long = "commit_sha")]
     commit_sha: String,
 
-    #[structopt(long = "baseSHA")]
+    #[structopt(long = "base_sha")]
     base_sha: String,
 }
 
@@ -16,4 +18,5 @@ struct Cli {
 fn main() {
     // Get the command-line arguments
     let args = Cli::from_args();
+    startup::clone_repo(args.repo);
 }
