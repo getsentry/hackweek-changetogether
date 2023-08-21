@@ -1,0 +1,21 @@
+name: "CI for checking file changes"
+inputs:
+  repo:
+    required: true
+  commit_sha:
+    required: true
+  base_sha:
+    required: true
+
+runs:
+  using: "composite"
+steps:
+    - name: Download release binary
+      uses: actions/download-artifact@v2
+      with:
+        name: change-together
+
+    - name: Run Rust program
+      run: |
+        chmod +x change-together
+        ./change-together -- --repo ${{ inputs.repo }} --commit_sha ${{ inputs.commit_sha }} --base_sha ${{ inputs.base_sha }}
