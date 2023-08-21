@@ -27,10 +27,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     startup::clone_repo(args.repo);
 
     // TODO: get the git diff, so don't use "new"s here, but actually use the arguments.
-    let repo = future_fn_to_get_repo(args.repo)?;
-    let target_commit = future_fn_to_get_target_commit(args.target_sha)?;
+    let repo = future_fn_to_get_repo(args.repo);
+    let target_commit = future_fn_to_get_target_commit(args.target_sha);
     let base_commit = future_fn_to_get_base_commit_or_parent_of_target_commit(
-        base_commit_ref.or_else(target_commit.parent()),
+        args.base_sha.or_else(target_commit.parent()),
     )?;
 
     // Get the ignores from the commit message, parse all of the files touched by this diff, then
