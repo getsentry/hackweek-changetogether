@@ -1,7 +1,11 @@
-use anyhow::{Context, Error};
-use git2::{Blob, Repository};
+use anyhow::{anyhow, Context, Error};
+use git2::{Blob, Commit, Diff, DiffDelta, Repository};
 use std::error::Error as Err;
 use structopt::StructOpt;
+
+use crate::message::get_ignores;
+use crate::parser::parse;
+use crate::resolver::resolve;
 
 mod message;
 mod parser;
@@ -33,59 +37,86 @@ fn app(repo: Repository, target_rev: String) -> Result<(), Error> {
         .parent(0)
         .context("Target commit {} has no parent")?;
 
-    // Get the ignores from the commit message, parse all of the files touched by this diff, then
-    // resolve all of the references in that parsed output. That should give us enough information
-    // to perform the actual analysis (namely, that everything we expect to have changed has
-    // actually changed).
-    let ignores = message::get_ignores(&target_commit)?;
-
     // Get the diff between the two commits.
     let diff = repo.diff_tree_to_tree(
         Some(&target_commit.tree()?),
         Some(&base_commit.tree()?),
         None,
     )?;
+    let target_blobs = deltas_to_blobs(&diff, &target_commit, &repo)?;
 
-    // Get the blobs of all files on the "new" side of the diff, aka all those touched by the
-    // `target_commit`.
+    // Get the ignores from the commit message, parse all of the files touched by this diff, then
+    // resolve all of the references in that parsed output. That should give us enough information
+    // to perform the actual analysis (namely, that everything we expect to have changed has
+    // actually changed).
+    let ignores = get_ignores(&target_commit)?;
+    let parsed_specs = parse(target_blobs, &ignores).map_err(|errors| report_errors(errors))?;
+    resolve(parsed_specs, diff.deltas()).map_err(|errors| report_errors(errors))
+}
+
+/// Helper function for conveniently displaying all discovered errors from a single phase.
+fn report_errors(errors: Vec<Error>) -> Error {
+    let len = errors.len();
+    let msg = errors
+        .into_iter()
+        .map(|e| format!("{}", e))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    anyhow::anyhow!(format!("Found {} errors:\n{}", len, msg))
+}
+
+/// Get the blobs of all files on the "new" side of the diff, aka all those touched by the
+/// `target_commit`.
+fn deltas_to_blobs<'a>(
+    diff: &'a Diff,
+    commit: &'a Commit,
+    repo: &'a Repository,
+) -> Result<Vec<Blob<'a>>, Error> {
     let mut target_blobs = Vec::<Blob>::new();
+    let mut maybe_err = None;
     diff.foreach(
         &mut |delta, _float| {
-            let file_path = delta.new_file().path().unwrap();
-            let blob = target_commit
-                .tree()
-                .unwrap() // TODO: no unwrap!
-                .get_path(file_path)
-                .unwrap() // TODO: no unwrap!
-                .to_object(&repo)
-                .unwrap() // TODO: no unwrap!
-                .into_blob()
-                .unwrap(); // TODO: no unwrap!
-            target_blobs.push(blob);
-            true
+            match delta_to_blob(delta, commit, repo) {
+                Ok(blob) => {
+                    target_blobs.push(blob);
+                    true
+                }
+                Err(err) => {
+                    maybe_err = Some(err);
+                    false
+                }
+            }
         },
         None,
         None,
         None,
     )?;
+    match maybe_err {
+        Some(err) => Err(err),
+        None => Ok(target_blobs),
+    }
+}
 
-    let parsed_specs = target_blobs.into_iter().try_fold(vec![], |mut acc, blob| {
-        match parser::parse(blob, &ignores) {
-            Ok(mut parsed_specs) => {
-                acc.append(&mut parsed_specs);
-                return Ok(acc);
-            }
-            Err(err) => return Err(err),
-        }
-    })?;
-    let resolved = resolver::resolve(parsed_specs);
-    todo!();
+/// Convert a single delta to the blob of its "new" side.
+fn delta_to_blob<'a>(
+    delta: DiffDelta,
+    commit: &'a Commit,
+    repo: &'a Repository,
+) -> Result<Blob<'a>, Error> {
+    let file_path = delta.new_file().path().unwrap();
+    Ok(commit
+        .tree()?
+        .get_path(file_path)?
+        .to_object(repo)?
+        .into_blob()
+        .map_err(|_| anyhow!("Could not access file deltas"))?) // TODO: better error message
 }
 
 #[cfg(test)]
 mod tests {
     use crate::app;
-    use crate::testing::helpers::{TestCommit, create_test_repo};
+    use crate::testing::helpers::{create_test_repo, TestCommit};
     use std::{collections::HashMap, error::Error as Err};
 
     #[test]
