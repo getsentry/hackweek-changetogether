@@ -1,6 +1,6 @@
-use anyhow::{Context};
+use anyhow::{Context, Error};
 use git2::{Blob, Repository};
-use std::error::Error;
+use std::error::Error as Err;
 use structopt::StructOpt;
 
 mod message;
@@ -17,17 +17,19 @@ struct Cli {
     target_rev: String,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // Handle the CLI input.
+fn main() -> Result<(), Box<dyn Err>> {
     let args = Cli::from_args();
     let repo = startup::clone_repo(args.repo)?;
+    Ok(app(repo, args.target_rev)?)
+}
 
+fn app(repo: Repository, target_rev: String) -> Result<(), Error> {
     let target_commit = repo
-        .revparse_single(args.target_rev.as_str())?
+        .revparse_single(target_rev.as_str())?
         .peel_to_commit()
-        .context(format!("Could not find target commit {}", args.target_rev))?;
+        .context(format!("Could not find target commit {}", target_rev))?;
     let base_commit = target_commit
-        .parent(1)
+        .parent(0)
         .context("Target commit {} has no parent")?;
 
     // Get the ignores from the commit message, parse all of the files touched by this diff, then
@@ -44,7 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
 
     // Get the blobs of all files on the "new" side of the diff, aka all those touched by the
-    // `target_commit.
+    // `target_commit`.
     let mut target_blobs = Vec::<Blob>::new();
     diff.foreach(
         &mut |delta, _float| {
@@ -76,7 +78,138 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     })?;
     let resolved = resolver::resolve(parsed_specs);
-
-    // future_fn_to_perform_analysis(repo.get_diff(target_commit, base_commit), resolved)?;
     todo!();
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::{anyhow, Context, Error};
+    use git2::{IndexEntry, Repository, IndexTime, Oid};
+    use std::{collections::HashMap, error::Error as Err, default};
+
+    use crate::app;
+
+    struct TestCommit<'a> {
+        msg: &'a str,
+        files: HashMap<&'static str, &'static str>,
+    }
+
+    /// An empty index entry.
+    fn create_empty_entry() -> IndexEntry {
+        IndexEntry {
+            ctime: IndexTime::new(0, 0),
+            mtime: IndexTime::new(0, 0),
+            dev: 0,
+            ino: 0,
+            mode: 0o100644,
+            uid: 0,
+            gid: 0,
+            file_size: 0,
+            id: Oid::from_bytes(&[0; 20]).unwrap(),
+            flags: 0,
+            flags_extended: 0,
+            path: Vec::new(),
+        }
+    }
+
+    /// Creates a repository with two commits in it.
+    fn create_test_repo(commits: &Vec<TestCommit>) -> Result<Repository, Error> {
+        let mut repo =
+            Repository::init_bare(":TESTING:").context("could not create in-memory repo")?;
+        commits.into_iter().try_for_each(|test_commit| create_test_commit(&mut repo, test_commit))?;
+        Ok(repo)
+    }
+
+    fn create_test_commit(repo: &mut Repository, data: &TestCommit) -> Result<(), Error> {
+        let mut index = repo.index()?;
+        index.clear()?;
+    
+        // Add files.
+        for (file_path, file_blob) in &data.files {
+            let mut entry = create_empty_entry();
+            entry.path = (*file_path).into();
+            index.add_frombuffer(&entry, file_blob.as_bytes())?;
+        }
+
+        // Commit the built up index.
+        let oid = index.write_tree()?;
+        let tree = repo.find_tree(oid)?;
+        let sig = repo.signature()?;
+
+        // Include a parent reference if one exists, then write the commit.
+        match repo.head() {
+            Ok(head) => {
+                let parent = head.peel_to_commit()?;
+                repo.commit(Some("HEAD"), &sig, &sig, data.msg, &tree, &[&parent])?;
+            },
+            Err(_) => {
+                repo.commit(Some("HEAD"), &sig, &sig, data.msg, &tree, &[])?;
+            },
+        };
+        Ok(())
+    }
+
+    // fn setup_repo() -> Result<Repository, git2::Error> {
+    //     // Initialize an in-memory repository
+    //     let repo = Repository::init_bare(":memory:")?;
+
+    //     // Create an initial commit
+    //     {
+    //         let tree_oid = {
+    //             let mut index = repo.index()?;
+    //             let oid = index.write_tree()?;
+    //             oid
+    //         };
+
+    //         let tree = repo.find_tree(tree_oid)?;
+    //         let sig = repo.signature()?;
+    //         repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])?;
+    //     }
+
+    //     // Second commit with "bar" in it
+    //     {
+    //         let blob_oid = repo.blob(b"Hello, world! bar")?;
+
+    //         let tree_oid = {
+    //             let mut index = repo.index()?;
+    //             index.add_frombuffer(&mut git2::IndexEntry {
+    //                 path: "file.txt".into(),
+    //                 oid: blob_oid,
+    //                 ..Default::default()
+    //             })?;
+    //             let oid = index.write_tree()?;
+    //             oid
+    //         };
+
+    //         let tree = repo.find_tree(tree_oid)?;
+    //         let sig = repo.signature()?;
+    //         repo.commit(
+    //             Some("HEAD"),
+    //             &sig,
+    //             &sig,
+    //             "Second commit",
+    //             &tree,
+    //             &[&repo.head()?.peel_to_commit()?],
+    //         )?;
+    //     }
+
+    //     Ok(repo)
+    // }
+
+    #[test]
+    fn test_good_no_change_together() -> Result<(), Box<dyn Err>> {
+        let data = vec![
+            TestCommit {
+                msg: "First commit".into(),
+                files: HashMap::from([("a.md", "# Original\n")]),
+            },
+            TestCommit {
+                msg: "Second commit".into(),
+                files: HashMap::from([("a.md", "# Changed\n")]),
+            },
+        ];
+        let repo = create_test_repo(&data)?;
+
+        Ok(app(repo, "HEAD".into())?)
+    }
 }
