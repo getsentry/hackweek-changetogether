@@ -39,22 +39,22 @@ pub(crate) fn get_ignores<'a>(commit: &'a Commit) -> Result<HashSet<Ignore<'a>>,
                 hash_set_with_all.insert(Ignore::All());
                 return Ok(hash_set_with_all);
             }
-            else if path_and_tag.contains("/") && path_and_tag.contains("#") {
+            else if path_and_tag.starts_with("/") && path_and_tag.contains("#") {
                 let parts: Vec<&str> = path_and_tag.split("#").collect();
                 let path = parts[0];
                 let tag = parts[1];
                 ignore_list.insert(Ignore::FileTag(PathBuf::from(path), tag));
             }
-            else if path_and_tag.contains("#") {
+            else if path_and_tag.starts_with("#") {
                 let parts: Vec<&str> = path_and_tag.split("#").collect();
                 let tag = parts[1];
                 ignore_list.insert(Ignore::Tag(tag));
             }
-            else if path_and_tag.contains("/") {
+            else if path_and_tag.starts_with("/") {
                 ignore_list.insert(Ignore::File(PathBuf::from(path_and_tag)));
             }
             else {
-                return Err("Error parsing string")
+                return Error::msg("Error parsing commit message");
             }
         }
     }
