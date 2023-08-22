@@ -7,6 +7,7 @@ mod message;
 mod parser;
 mod resolver;
 mod startup;
+mod testing;
 
 #[derive(StructOpt, Debug)]
 struct Cli {
@@ -83,118 +84,9 @@ fn app(repo: Repository, target_rev: String) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::{anyhow, Context, Error};
-    use git2::{IndexEntry, Repository, IndexTime, Oid};
-    use std::{collections::HashMap, error::Error as Err, default};
-
     use crate::app;
-
-    struct TestCommit<'a> {
-        msg: &'a str,
-        files: HashMap<&'static str, &'static str>,
-    }
-
-    /// An empty index entry.
-    fn create_empty_entry() -> IndexEntry {
-        IndexEntry {
-            ctime: IndexTime::new(0, 0),
-            mtime: IndexTime::new(0, 0),
-            dev: 0,
-            ino: 0,
-            mode: 0o100644,
-            uid: 0,
-            gid: 0,
-            file_size: 0,
-            id: Oid::from_bytes(&[0; 20]).unwrap(),
-            flags: 0,
-            flags_extended: 0,
-            path: Vec::new(),
-        }
-    }
-
-    /// Creates a repository with two commits in it.
-    fn create_test_repo(commits: &Vec<TestCommit>) -> Result<Repository, Error> {
-        let mut repo =
-            Repository::init_bare(":TESTING:").context("could not create in-memory repo")?;
-        commits.into_iter().try_for_each(|test_commit| create_test_commit(&mut repo, test_commit))?;
-        Ok(repo)
-    }
-
-    fn create_test_commit(repo: &mut Repository, data: &TestCommit) -> Result<(), Error> {
-        let mut index = repo.index()?;
-        index.clear()?;
-    
-        // Add files.
-        for (file_path, file_blob) in &data.files {
-            let mut entry = create_empty_entry();
-            entry.path = (*file_path).into();
-            index.add_frombuffer(&entry, file_blob.as_bytes())?;
-        }
-
-        // Commit the built up index.
-        let oid = index.write_tree()?;
-        let tree = repo.find_tree(oid)?;
-        let sig = repo.signature()?;
-
-        // Include a parent reference if one exists, then write the commit.
-        match repo.head() {
-            Ok(head) => {
-                let parent = head.peel_to_commit()?;
-                repo.commit(Some("HEAD"), &sig, &sig, data.msg, &tree, &[&parent])?;
-            },
-            Err(_) => {
-                repo.commit(Some("HEAD"), &sig, &sig, data.msg, &tree, &[])?;
-            },
-        };
-        Ok(())
-    }
-
-    // fn setup_repo() -> Result<Repository, git2::Error> {
-    //     // Initialize an in-memory repository
-    //     let repo = Repository::init_bare(":memory:")?;
-
-    //     // Create an initial commit
-    //     {
-    //         let tree_oid = {
-    //             let mut index = repo.index()?;
-    //             let oid = index.write_tree()?;
-    //             oid
-    //         };
-
-    //         let tree = repo.find_tree(tree_oid)?;
-    //         let sig = repo.signature()?;
-    //         repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])?;
-    //     }
-
-    //     // Second commit with "bar" in it
-    //     {
-    //         let blob_oid = repo.blob(b"Hello, world! bar")?;
-
-    //         let tree_oid = {
-    //             let mut index = repo.index()?;
-    //             index.add_frombuffer(&mut git2::IndexEntry {
-    //                 path: "file.txt".into(),
-    //                 oid: blob_oid,
-    //                 ..Default::default()
-    //             })?;
-    //             let oid = index.write_tree()?;
-    //             oid
-    //         };
-
-    //         let tree = repo.find_tree(tree_oid)?;
-    //         let sig = repo.signature()?;
-    //         repo.commit(
-    //             Some("HEAD"),
-    //             &sig,
-    //             &sig,
-    //             "Second commit",
-    //             &tree,
-    //             &[&repo.head()?.peel_to_commit()?],
-    //         )?;
-    //     }
-
-    //     Ok(repo)
-    // }
+    use crate::testing::helpers::{TestCommit, create_test_repo};
+    use std::{collections::HashMap, error::Error as Err};
 
     #[test]
     fn test_good_no_change_together() -> Result<(), Box<dyn Err>> {
