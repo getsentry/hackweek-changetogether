@@ -31,6 +31,16 @@ pub(crate) struct ParseError<'a> {
     pub len: usize,
 }
 
+impl<'a> PrintError for ParseError<'a> {
+    fn print(&self, leading_whitespace: usize) -> String {
+        // TODO: can probably have fewer allocations here...
+        let offset = String::from_utf8(vec![b' '; leading_whitespace]);
+        let whitespace = String::from_utf8(vec![b' '; leading_whitespace + self.pos]);
+        let fence = String::from_utf8(vec![b'^'; self.len]);
+        return format!("{}{}\n{}{}\n", offset, self.line.text, whitespace, fence);
+    }
+}
+
 /// An exhaustive enumeration of all of the parsing errors we can encounter.
 #[derive(Debug, Clone, ThisError)]
 pub(crate) enum ParseErrorKind {
