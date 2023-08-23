@@ -12,6 +12,7 @@ runs:
 
     - name: Download Release Binary
       id: download-binary
+      shell: bash
       run: |
         # Replace with your GitHub repository and release tag details
         REPO_OWNER=getsentry
