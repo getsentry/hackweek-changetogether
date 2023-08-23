@@ -10,13 +10,25 @@ runs:
   steps:
     - uses: actions/checkout@v3
 
-    - name: Download release binary
-      uses: actions/download-artifact@v2
-      with:
-        name: change-together
+    - name: Download Release Binary
+        id: download-binary
+        run: |
+          # Replace with your GitHub repository and release tag details
+          REPO_OWNER=getsentry
+          REPO_NAME=hackweek-changetogether
+          RELEASE_TAG=v0.1.0
+          ASSET_NAME=hackweek-changetogether # Replace with the name of the binary asset
+
+          # Download the release binary
+          curl -LO "https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$RELEASE_TAG/$ASSET_NAME"
+
+          # Make the binary executable (if needed)
+          chmod +x $ASSET_NAME
+
+          # Move the binary to a directory in your PATH
+          mv $ASSET_NAME /usr/local/bin/
 
     - name: Run Rust program
       shell: bash
       run: |
-        chmod +x change-together
-        ./change-together -- --repo ${{ inputs.repo }} --target_rev ${{ inputs.target_sha }}
+        hackweek-changetogether -- --repo ${{ inputs.repo }} --target_rev ${{ inputs.target_sha }}
