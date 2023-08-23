@@ -3,11 +3,10 @@ use git2::{Commit, Diff, DiffDelta, Repository};
 use std::error::Error as Err;
 use structopt::StructOpt;
 
-
 use crate::common::BlobFile;
 use crate::errors::PrintError;
 use crate::message::get_ignores;
-use crate::parser::parse;
+use crate::parser::Parser;
 use crate::resolver::resolve;
 
 mod common;
@@ -55,7 +54,9 @@ fn app(repo: Repository, target_rev: String) -> Result<(), Error> {
     // to perform the actual analysis (namely, that everything we expect to have changed has
     // actually changed).
     let ignores = get_ignores(&target_commit)?;
-    let parsed_specs = parse(target_blob_files, &ignores).map_err(|errs| report_errors(errs))?;
+    let parsed_specs = Parser::new()
+        .parse(target_blob_files, &ignores)
+        .map_err(|errs| report_errors(errs))?;
     // TODO: better resolved error handling
     resolve(parsed_specs, diff.deltas()).map_err(|errs| anyhow!("TODO: collate resolution errors"))
 }
@@ -118,7 +119,7 @@ fn delta_to_blob_file<'a>(
             .to_object(repo)?
             .into_blob()
             .map_err(|_| anyhow!("Could not access file deltas"))?,
-    )) // TODO: better error message
+    ))
 }
 
 #[cfg(test)]
