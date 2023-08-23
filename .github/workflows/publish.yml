@@ -24,8 +24,8 @@ jobs:
     - name: Test
       run: cargo test
 
-    - name: Archive build artifacts
-      uses: actions/upload-artifact@v2
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
       with:
         name: change-together
-        path: target/release/hackweek-changetogether
+        files: target/release/hackweek-changetogether
