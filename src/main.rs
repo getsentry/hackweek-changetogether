@@ -4,8 +4,8 @@ use std::error::Error as Err;
 use structopt::StructOpt;
 
 use crate::message::get_ignores;
-use crate::parser::parse;
-use crate::resolver::resolve;
+// use crate::parser::parse;
+// use crate::resolver::resolve;
 
 mod message;
 mod parser;
@@ -50,8 +50,9 @@ fn app(repo: Repository, target_rev: String) -> Result<(), Error> {
     // to perform the actual analysis (namely, that everything we expect to have changed has
     // actually changed).
     let ignores = get_ignores(&target_commit)?;
-    let parsed_specs = parse(target_blobs, &ignores).map_err(|errors| report_errors(errors))?;
-    resolve(parsed_specs, diff.deltas()).map_err(|errors| report_errors(errors))
+    Ok(())
+    // let parsed_specs = parse(target_blobs, &ignores).map_err(|errors| report_errors(errors))?;
+    // resolve(parsed_specs, diff.deltas()).map_err(|errors| report_errors(errors))
 }
 
 /// Helper function for conveniently displaying all discovered errors from a single phase.

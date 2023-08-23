@@ -22,6 +22,7 @@ pub(crate) enum Ignore<'a> {
     All(),
 }
 
+// Returns a list of ignored files/tags to be disregarded during the resolving process.
 pub(crate) fn get_ignores<'a>(commit: &'a Commit) -> Result<HashSet<Ignore<'a>>, Error> {
     let commit_message = commit.message().unwrap_or("");
     let pattern = r"CHANGE_TOGETHER_IGNORE=([^\s]+)";
@@ -54,7 +55,8 @@ pub(crate) fn get_ignores<'a>(commit: &'a Commit) -> Result<HashSet<Ignore<'a>>,
                 ignore_list.insert(Ignore::File(PathBuf::from(path_and_tag)));
             }
             else {
-                return Error::msg("Error parsing commit message");
+                // TODO: Better error handling
+                return Err(Error::msg("Error parsing commit message"));
             }
         }
     }
