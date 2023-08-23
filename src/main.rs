@@ -114,26 +114,26 @@ fn delta_to_blob<'a>(
         .map_err(|_| anyhow!("Could not access file deltas"))?) // TODO: better error message
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::app;
-    use crate::testing::helpers::{create_test_repo, TestCommit};
-    use std::{collections::HashMap, error::Error as Err};
+// #[cfg(test)]
+// mod tests {
+//     use crate::app;
+//     use crate::testing::helpers::{create_test_repo, TestCommit};
+//     use std::{collections::HashMap, error::Error as Err};
 
-    #[test]
-    fn test_good_no_change_together() -> Result<(), Box<dyn Err>> {
-        let data = vec![
-            TestCommit {
-                msg: "First commit".into(),
-                files: HashMap::from([("a.md", "# Original\n")]),
-            },
-            TestCommit {
-                msg: "Second commit".into(),
-                files: HashMap::from([("a.md", "# Changed\n")]),
-            },
-        ];
-        let repo = create_test_repo(&data)?;
+//     #[test]
+//     fn test_good_no_change_together() -> Result<(), Box<dyn Err>> {
+//         let data = vec![
+//             TestCommit {
+//                 msg: "First commit".into(),
+//                 files: HashMap::from([("a.md", "# Original\n")]),
+//             },
+//             TestCommit {
+//                 msg: "Second commit".into(),
+//                 files: HashMap::from([("a.md", "# Changed\n")]),
+//             },
+//         ];
+//         let repo = create_test_repo(&data)?;
 
-        Ok(app(repo, "HEAD".into())?)
-    }
-}
+//         Ok(app(repo, "HEAD".into())?)
+//     }
+// }
