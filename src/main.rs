@@ -1,12 +1,17 @@
 use anyhow::{anyhow, Context, Error};
-use git2::{Blob, Commit, Diff, DiffDelta, Repository};
+use git2::{Commit, Diff, DiffDelta, Repository};
 use std::error::Error as Err;
 use structopt::StructOpt;
 
+
+use crate::common::BlobFile;
+use crate::errors::PrintError;
 use crate::message::get_ignores;
 // use crate::parser::parse;
 // use crate::resolver::resolve;
 
+mod common;
+mod errors;
 mod message;
 mod parser;
 mod resolver;
@@ -43,24 +48,25 @@ fn app(repo: Repository, target_rev: String) -> Result<(), Error> {
         Some(&base_commit.tree()?),
         None,
     )?;
-    let target_blobs = deltas_to_blobs(&diff, &target_commit, &repo)?;
+    let target_blob_files = deltas_to_blob_files(&diff, &target_commit, &repo)?;
 
     // Get the ignores from the commit message, parse all of the files touched by this diff, then
     // resolve all of the references in that parsed output. That should give us enough information
     // to perform the actual analysis (namely, that everything we expect to have changed has
     // actually changed).
     let ignores = get_ignores(&target_commit)?;
-    Ok(())
-    // let parsed_specs = parse(target_blobs, &ignores).map_err(|errors| report_errors(errors))?;
-    // resolve(parsed_specs, diff.deltas()).map_err(|errors| report_errors(errors))
+    let parsed_specs = parse(target_blob_files, &ignores).map_err(|errs| report_errors(errs))?;
+    // TODO: better resolved error handling
+    resolve(parsed_specs, diff.deltas()).map_err(|errs| anyhow!("TODO: collate resolution errors"))
 }
 
 /// Helper function for conveniently displaying all discovered errors from a single phase.
-fn report_errors(errors: Vec<Error>) -> Error {
+fn report_errors<'a>(errors: Vec<errors::ParseError<'a>>) -> Error {
     let len = errors.len();
     let msg = errors
         .into_iter()
-        .map(|e| format!("{}", e))
+        // TODO: the zero below is probably incorrect...
+        .map(|e| format!("{}", e.print(0)))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -69,24 +75,22 @@ fn report_errors(errors: Vec<Error>) -> Error {
 
 /// Get the blobs of all files on the "new" side of the diff, aka all those touched by the
 /// `target_commit`.
-fn deltas_to_blobs<'a>(
-    diff: &'a Diff,
-    commit: &'a Commit,
+fn deltas_to_blob_files<'a>(
+    diff: &'a Diff<'a>,
+    commit: &'a Commit<'a>,
     repo: &'a Repository,
-) -> Result<Vec<Blob<'a>>, Error> {
-    let mut target_blobs = Vec::<Blob>::new();
+) -> Result<Vec<BlobFile<'a>>, Error> {
+    let mut target_blob_files = Vec::<BlobFile>::new();
     let mut maybe_err = None;
     diff.foreach(
-        &mut |delta, _float| {
-            match delta_to_blob(delta, commit, repo) {
-                Ok(blob) => {
-                    target_blobs.push(blob);
-                    true
-                }
-                Err(err) => {
-                    maybe_err = Some(err);
-                    false
-                }
+        &mut |delta, _float| match delta_to_blob_file(delta, commit, repo) {
+            Ok(blob_file) => {
+                target_blob_files.push(blob_file);
+                true
+            }
+            Err(err) => {
+                maybe_err = Some(err);
+                false
             }
         },
         None,
@@ -95,23 +99,26 @@ fn deltas_to_blobs<'a>(
     )?;
     match maybe_err {
         Some(err) => Err(err),
-        None => Ok(target_blobs),
+        None => Ok(target_blob_files),
     }
 }
 
 /// Convert a single delta to the blob of its "new" side.
-fn delta_to_blob<'a>(
-    delta: DiffDelta,
+fn delta_to_blob_file<'a>(
+    delta: DiffDelta<'a>,
     commit: &'a Commit,
     repo: &'a Repository,
-) -> Result<Blob<'a>, Error> {
+) -> Result<BlobFile<'a>, Error> {
     let file_path = delta.new_file().path().unwrap();
-    Ok(commit
-        .tree()?
-        .get_path(file_path)?
-        .to_object(repo)?
-        .into_blob()
-        .map_err(|_| anyhow!("Could not access file deltas"))?) // TODO: better error message
+    Ok(BlobFile::new(
+        file_path,
+        commit
+            .tree()?
+            .get_path(file_path)?
+            .to_object(repo)?
+            .into_blob()
+            .map_err(|_| anyhow!("Could not access file deltas"))?,
+    )) // TODO: better error message
 }
 
 // #[cfg(test)]
