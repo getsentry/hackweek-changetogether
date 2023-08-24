@@ -24,7 +24,7 @@ struct ResolvedSpec<'a> {
 }
 
 fn resolve_spec(link: &ParsedLink, diff: &Diff) -> Result<(), Error> {
-    let file_path = link.file;
+    let file_path = link.file.path;
     for delta in diff.deltas() {
         if let Some(delta_path) = delta.new_file().path() {
             if delta_path == file_path {
