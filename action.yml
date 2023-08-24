@@ -15,7 +15,7 @@ runs:
         # Replace with your GitHub repository and release tag details
         REPO_OWNER=getsentry
         REPO_NAME=hackweek-changetogether
-        RELEASE_TAG=0.2
+        RELEASE_TAG=0.4
         ASSET_NAME=hackweek-changetogether # Replace with the name of the binary asset
 
         # Download the release binary
