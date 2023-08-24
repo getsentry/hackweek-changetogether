@@ -7,7 +7,7 @@ use git2::Commit;
 use regex::Regex;
 
 /// Describes a commit-message level `CHANGE_TOGETHER_IGNORE` statement.
-#[derive(PartialEq, Hash, Eq, Debug)]
+#[derive(Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Ignore<'a> {
     /// A commit-message ignore like `CHANGE_TOGETHER_IGNORE=/path/to/my/file`
     File(PathBuf),
@@ -19,7 +19,7 @@ pub(crate) enum Ignore<'a> {
     FileTag(PathBuf, &'a str),
 
     /// A commit-message ignore like `CHANGE_TOGETHER_IGNORE=*`
-    All(),
+    All,
 }
 
 // Returns a list of ignored files/tags to be disregarded during the resolving process.

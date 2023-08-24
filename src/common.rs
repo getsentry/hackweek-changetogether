@@ -1,14 +1,25 @@
-use std::{num::NonZeroUsize, path::Path};
+use std::{num::NonZeroUsize, path::PathBuf};
 
-use git2::Blob;
+use git2::{Oid, Blob};
+
+pub(crate) struct FileOid {
+    pub path: PathBuf,
+    pub oid: Oid,
+}
+
+impl FileOid {
+    pub fn new(path: PathBuf, oid: Oid) -> FileOid {
+        FileOid { path, oid }
+    }
+}
 
 pub(crate) struct BlobFile<'a> {
-    pub path: &'a Path,
+    pub path: PathBuf,
     pub blob: Blob<'a>,
 }
 
 impl<'a> BlobFile<'a> {
-    pub fn new(path: &'a Path, blob: Blob<'a>) -> BlobFile<'a> {
+    pub fn new(path: PathBuf, blob: Blob<'a>) -> BlobFile {
         BlobFile { path, blob }
     }
 }

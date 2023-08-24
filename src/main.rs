@@ -1,9 +1,11 @@
 use anyhow::{anyhow, Context, Error};
-use git2::{Commit, Diff, DiffDelta, Repository};
+use common::BlobFile;
+use git2::{Commit, Diff, DiffDelta, Repository, Oid};
+use std::collections::HashMap;
 use std::error::Error as Err;
 use structopt::StructOpt;
 
-use crate::common::BlobFile;
+use crate::common::FileOid;
 use crate::errors::PrintError;
 use crate::message::get_ignores;
 use crate::parser::Parser;
@@ -47,18 +49,27 @@ fn app(repo: Repository, target_rev: String) -> Result<(), Error> {
         Some(&base_commit.tree()?),
         None,
     )?;
-    let target_blob_files = deltas_to_blob_files(&diff, &target_commit, &repo)?;
+    let blob_map =
+        deltas_to_file_ids(&diff, &target_commit, &repo)?
+            .into_iter()
+            .try_fold(HashMap::new(), |mut acc, file_id| {
+                let blob = repo
+                    .find_blob(file_id.oid)
+                    .map_err(|_| anyhow!("could not find blob"))?;
+                acc.insert(file_id.oid, BlobFile::new(file_id.path, blob));
+                Ok::<HashMap<Oid, BlobFile>, Error>(acc)
+            })?;
 
     // Get the ignores from the commit message, parse all of the files touched by this diff, then
     // resolve all of the references in that parsed output. That should give us enough information
     // to perform the actual analysis (namely, that everything we expect to have changed has
     // actually changed).
     let ignores = get_ignores(&target_commit)?;
-    let parsed_specs = Parser::new()
-        .parse(target_blob_files, &ignores)
+    let parsed_specs = Parser::new(&blob_map)
+        .parse(&ignores)
         .map_err(|errs| report_errors(errs))?;
     // TODO: better resolved error handling
-    resolve(parsed_specs, diff.deltas()).map_err(|errs| anyhow!("TODO: collate resolution errors"))
+    resolve(parsed_specs, diff.deltas()).map_err(|_| anyhow!("TODO: collate resolution errors"))
 }
 
 /// Helper function for conveniently displaying all discovered errors from a single phase.
@@ -76,15 +87,15 @@ fn report_errors<'a>(errors: Vec<errors::ParseError<'a>>) -> Error {
 
 /// Get the blobs of all files on the "new" side of the diff, aka all those touched by the
 /// `target_commit`.
-fn deltas_to_blob_files<'a>(
+fn deltas_to_file_ids<'a>(
     diff: &'a Diff<'a>,
     commit: &'a Commit<'a>,
     repo: &'a Repository,
-) -> Result<Vec<BlobFile<'a>>, Error> {
-    let mut target_blob_files = Vec::<BlobFile>::new();
+) -> Result<Vec<FileOid>, Error> {
+    let mut target_blob_files = Vec::<FileOid>::new();
     let mut maybe_err = None;
     diff.foreach(
-        &mut |delta, _float| match delta_to_blob_file(delta, commit, repo) {
+        &mut |delta, _float| match delta_to_file_id(delta, commit, repo) {
             Ok(blob_file) => {
                 target_blob_files.push(blob_file);
                 true
@@ -105,20 +116,21 @@ fn deltas_to_blob_files<'a>(
 }
 
 /// Convert a single delta to the blob of its "new" side.
-fn delta_to_blob_file<'a>(
+fn delta_to_file_id<'a>(
     delta: DiffDelta<'a>,
     commit: &'a Commit,
     repo: &'a Repository,
-) -> Result<BlobFile<'a>, Error> {
+) -> Result<FileOid, Error> {
     let file_path = delta.new_file().path().unwrap();
-    Ok(BlobFile::new(
-        file_path,
+    Ok(FileOid::new(
+        file_path.into(),
         commit
             .tree()?
             .get_path(file_path)?
             .to_object(repo)?
             .into_blob()
-            .map_err(|_| anyhow!("Could not access file deltas"))?,
+            .map_err(|_| anyhow!("Could not access file deltas"))?
+            .id(),
     ))
 }
 

@@ -1,16 +1,17 @@
 use anyhow::{anyhow, Error};
 use edit_distance::edit_distance;
+use git2::{Blob, Oid};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::num::NonZeroUsize;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::from_utf8;
 use substring::Substring;
 
-use crate::common::{BlobFile, Location, NonWhitespaceLine};
+use crate::common::{Location, NonWhitespaceLine, BlobFile};
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::message::Ignore;
 
@@ -53,26 +54,33 @@ struct ParsableLineSegment<'a> {
 }
 
 pub(crate) struct Parser<'a> {
+    blob_files: &'a HashMap<Oid, BlobFile<'a>>,
     errs: Vec<ParseError<'a>>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new() -> Parser<'a> {
-        Parser { errs: vec![] }
+    pub fn new(blob_files: &'a HashMap<Oid, BlobFile<'a>>) -> Parser<'a> {
+        Parser {
+            blob_files,
+            errs: vec![],
+        }
     }
 
+    /// Parse all of the file `blobs` supplied to this parser.
     pub fn parse(
-        &mut self,
-        blob_files: Vec<BlobFile<'a>>,
+        mut self,
         ignoring: &'a HashSet<Ignore<'a>>,
     ) -> Result<Vec<ParsedSpec<'a>>, Vec<ParseError<'a>>> {
-        // Record the first line that results in an error. This will prevent us from proceeding to the
-        // next step.
-        let mut fatal_err: Result<(), Error> = Ok(());
-        let mut errs = vec![];
+        // Clear errors, just in case the `Parser` is accidentally re-used.
+        self.errs = vec![];
 
-        let parsed_specs = blob_files.into_iter().fold(vec![], |mut acc, blob_file| {
-            match self.parse_blob_file(blob_file, ignoring) {
+        // Record the first line that results in an error. This will prevent us from proceeding to
+        // the next step.
+        let mut fatal_err: Result<(), Error> = Ok(());
+
+        let parsed_specs = self.blob_files.into_iter().fold(vec![], |mut acc, (_, blob_file)| {
+            // TODO: maybe remove clone?
+            match self.parse_blob_file(blob_file.path.clone(), &blob_file.blob, ignoring) {
                 Ok(mut parsed_specs) => {
                     acc.append(&mut parsed_specs);
                 }
@@ -86,27 +94,35 @@ impl<'a> Parser<'a> {
         });
 
         // If even a single compilation failed in a non-recoverable way, we do not proceed.
-        if let Err(err) = fatal_err {
-            return Err(errs);
+        if let Err(_) = fatal_err {
+            return Err(self.errs);
         }
         Ok(parsed_specs)
     }
 
     fn parse_blob_file(
         &mut self,
-        blob_file: BlobFile<'a>,
-        // TODO: actually use `ignoring`.
+        path: PathBuf,
+        blob: &'a Blob<'a>,
         ignoring: &'a HashSet<Ignore<'a>>,
     ) -> Result<Vec<ParsedSpec<'a>>, Error> {
-        let utf8 = match from_utf8(blob_file.blob.content()) {
+        // Short-circuit: if the user wants to ignore everything, just return an empty vector.
+        if ignoring.contains(&Ignore::All) {
+            return Ok(vec![]);
+        }
+
+        // TODO: actually use `ignoring` to filter out files from parsing.
+
+        let utf8 = match from_utf8(blob.content()) {
             Ok(utf8) => utf8,
-            // Non-UTF8 files are okay to have in the diff, but we ignore them for analysis purposes.
-            Err(err) => return Ok(vec![]),
+            // Non-UTF8 files are okay to have in the diff, but we ignore them for analysis
+            // purposes.
+            Err(_) => return Ok(vec![]),
         };
 
         // Ignore files with unknown extensions.
         // TODO: clean up this nesting.
-        let ext_regex = match blob_file.path.extension() {
+        let ext_regex = match path.extension() {
             Some(ext) => match EXTENSION_TO_COMMENT_REGEX.get(ext) {
                 Some(regex) => regex,
                 // Unknown extension.
@@ -147,17 +163,17 @@ impl<'a> Parser<'a> {
         todo!()
     }
 
-    // TODO: our parsing strategy for this is pretty wasteful, since we have to read the line twice via
-    // a regex before we even start parsing the annotation itself. We may want to look at doing more
-    // traditional lexing with a single pass to speed things up in the future.
+    // TODO: our parsing strategy for this is pretty wasteful, since we have to read the line twice
+    // via a regex before we even start parsing the annotation itself. We may want to look at doing
+    // more traditional lexing with a single pass to speed things up in the future.
     fn parse_line<'b>(
         &mut self,
         line: NonWhitespaceLine<'a>,
         comment_regex: &'b Regex,
     ) -> Result<Option<Decl<'a>>, Error> {
         // See if we can get a matching comment line structure inside the brackets. If we can't, we
-        // assume that this was not a correct comment line. Note that the `UNWRAPPING_REGEX` is pretty
-        // forgiving of errors, so we can catch some obvious misspellings here.
+        // assume that this was not a correct comment line. Note that the `UNWRAPPING_REGEX` is
+        // pretty forgiving of errors, so we can catch some obvious misspellings here.
         let parsable_segment = match self.unwrap_line_contents(line, comment_regex)? {
             Some(unbracketed_text) => unbracketed_text,
             None => return Ok(None),
@@ -198,8 +214,8 @@ impl<'a> Parser<'a> {
             None => return Ok(None),
         };
 
-        // The unwraps below are safe, because we want to always panic if one of these named groups was
-        // not found in our regex, as this is a programmer error.
+        // The unwraps below are safe, because we want to always panic if one of these named groups
+        // was not found in our regex, as this is a programmer error.
         let bangs = matches.name("bang").unwrap();
         let gap0 = matches.name("gap0").unwrap();
         let open = matches.name("open").unwrap();
@@ -283,6 +299,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
+    /// The parser for the parsable segment of a single `![[ChangeTogether...]]` declaration.
     fn parse_decl(
         &mut self,
         line: NonWhitespaceLine<'a>,
@@ -349,25 +366,25 @@ impl<'a> Parser<'a> {
                 Err(anyhow!("method unrecognized"))
             }
             _ => {
-                self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, method.loc));
+                self.errs
+                    .push(ParseError::new(ParseErrorKind::UnexpectedToken, method.loc));
                 Err(anyhow!("unexpected token"))
             }
         }
     }
 
-    // TODO: maybe return iterator instead of vec?
+    /// The lexer for the parsable segment of a single `ChangeTogether` line.
     fn lex_decl(
         &mut self,
         text: &'a str,
         line: NonWhitespaceLine<'a>,
         offset: usize,
+        // TODO: maybe return iterator instead of vec?
     ) -> Result<VecDeque<Token<'a>>, Error> {
         let mut tokens = VecDeque::new();
-        let mut from = 0;
+        let mut from = offset;
         let mut in_string = false;
         for (i, ch) in text.chars().enumerate() {
-            let len = (i - from) + 1;
-
             // Is this the end of a string?
             if in_string {
                 if ch == '"' {
@@ -383,6 +400,10 @@ impl<'a> Parser<'a> {
             // Is it the start of a string?
             if ch == '"' {
                 in_string = true;
+                tokens.push_back(Token {
+                    loc: Location::new(line, from, i - from),
+                    data: TokenData::StringContents(text.substring(from, i)),
+                });
                 from = i + 1;
                 continue;
             }
@@ -469,7 +490,8 @@ impl<'a> Parser<'a> {
             Some(token) => match token.data {
                 TokenData::OpenParen => method_token.loc.concat(token.loc),
                 _ => {
-                    self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
+                    self.errs
+                        .push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
                     return Err(anyhow!("unexpected token"));
                 }
             },
@@ -478,7 +500,8 @@ impl<'a> Parser<'a> {
         // We are looking at the one-argument variant - parse the name.
         let name = match tokens.pop_front() {
             None => {
-                self.errs.push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
+                self.errs
+                    .push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
                 return Err(anyhow!("unclosed paren"));
             }
             Some(token) => match token.data {
@@ -498,7 +521,8 @@ impl<'a> Parser<'a> {
                     return Ok(Decl::new(DeclData::Start(None), loc.concat(token.loc)));
                 }
                 _ => {
-                    self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
+                    self.errs
+                        .push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
                     return Err(anyhow!("unexpected token"));
                 }
             },
@@ -508,13 +532,15 @@ impl<'a> Parser<'a> {
         loc.concat(name.loc);
         loc = match tokens.pop_front() {
             None => {
-                self.errs.push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
+                self.errs
+                    .push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
                 return Err(anyhow!("unclosed paren"));
             }
             Some(token) => match token.data {
                 TokenData::CloseParen => loc.concat(token.loc),
                 _ => {
-                    self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
+                    self.errs
+                        .push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
                     return Err(anyhow!("unexpected token"));
                 }
             },
@@ -523,7 +549,8 @@ impl<'a> Parser<'a> {
         // Make sure there are no extra tokens after the end.
         match tokens.pop_front() {
             Some(token) => {
-                self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
+                self.errs
+                    .push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
                 Err(anyhow!("unexpected token"))
             }
             None => Ok(Decl::new(
@@ -564,7 +591,8 @@ impl<'a> Parser<'a> {
             Some(token) => match token.data {
                 TokenData::OpenParen => method_token.loc.concat(token.loc),
                 _ => {
-                    self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
+                    self.errs
+                        .push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
                     return Err(anyhow!("unexpected token"));
                 }
             },
@@ -572,7 +600,8 @@ impl<'a> Parser<'a> {
 
         let file = match tokens.pop_front() {
             None => {
-                self.errs.push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
+                self.errs
+                    .push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
                 return Err(anyhow!("unclosed paren"));
             }
             Some(token) => match token.data {
@@ -589,7 +618,8 @@ impl<'a> Parser<'a> {
                     File::new(Path::new(contents), token.loc)
                 }
                 _ => {
-                    self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
+                    self.errs
+                        .push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
                     return Err(anyhow!("unexpected token"));
                 }
             },
@@ -600,7 +630,8 @@ impl<'a> Parser<'a> {
         loc.concat(file.loc);
         loc = match tokens.pop_front() {
             None => {
-                self.errs.push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
+                self.errs
+                    .push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
                 return Err(anyhow!("unclosed paren"));
             }
             Some(token) => match token.data {
@@ -610,7 +641,8 @@ impl<'a> Parser<'a> {
                 }
                 TokenData::Comma => loc.concat(token.loc),
                 _ => {
-                    self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
+                    self.errs
+                        .push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
                     return Err(anyhow!("unexpected token"));
                 }
             },
@@ -621,7 +653,8 @@ impl<'a> Parser<'a> {
             // Make sure there are no extra tokens after the end.
             return match tokens.pop_front() {
                 Some(token) => {
-                    self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
+                    self.errs
+                        .push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
                     Err(anyhow!("unexpected token"))
                 }
                 None => Ok(Decl::new(DeclData::With(file, None), loc)),
@@ -631,7 +664,8 @@ impl<'a> Parser<'a> {
         // Parse the second tag name argument.
         let name = match tokens.pop_front() {
             None => {
-                self.errs.push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
+                self.errs
+                    .push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
                 return Err(anyhow!("unclosed paren"));
             }
             Some(token) => match token.data {
@@ -644,11 +678,13 @@ impl<'a> Parser<'a> {
                     Name::new(contents, token.loc)
                 }
                 TokenData::CloseParen => {
-                    self.errs.push(ParseError::new(ParseErrorKind::UnnecessaryComa, token.loc));
+                    self.errs
+                        .push(ParseError::new(ParseErrorKind::UnnecessaryComa, token.loc));
                     return Ok(Decl::new(DeclData::Start(None), loc.concat(token.loc)));
                 }
                 _ => {
-                    self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
+                    self.errs
+                        .push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
                     return Err(anyhow!("unexpected token"));
                 }
             },
@@ -658,13 +694,15 @@ impl<'a> Parser<'a> {
         loc.concat(name.loc);
         loc = match tokens.pop_front() {
             None => {
-                self.errs.push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
+                self.errs
+                    .push(ParseError::new(ParseErrorKind::UnclosedParen, loc));
                 return Err(anyhow!("unclosed paren"));
             }
             Some(token) => match token.data {
                 TokenData::CloseParen => loc.concat(token.loc),
                 _ => {
-                    self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
+                    self.errs
+                        .push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
                     return Err(anyhow!("unexpected token"));
                 }
             },
@@ -673,19 +711,23 @@ impl<'a> Parser<'a> {
         // Make sure there are no extra tokens after the end.
         return match tokens.pop_front() {
             Some(token) => {
-                self.errs.push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
+                self.errs
+                    .push(ParseError::new(ParseErrorKind::UnexpectedToken, token.loc));
                 Err(anyhow!("unexpected token"))
             }
             None => Ok(Decl::new(DeclData::With(file, Some(name)), loc)),
         };
     }
-}/// A declaration and its source line, useful together for error reporting.
+}
+
+/// A declaration and its source line, useful together for error reporting.
 struct Decl<'a> {
     /// Refers to the position of the `.` in the `line`.
     pub loc: Location<'a>,
     pub data: DeclData<'a>,
 }
 
+/// A parsed declaration. In other words, the full parsing of a single parsable segment.
 impl<'a> Decl<'a> {
     fn new(data: DeclData<'a>, loc: Location<'a>) -> Decl<'a> {
         Decl { data, loc }
@@ -698,6 +740,7 @@ enum DeclData<'a> {
     End(Option<Name<'a>>),
 }
 
+/// A parsed filename.
 struct File<'a> {
     /// Refers to the position of the first letter of the file name, not the surrounding quotes.
     pub loc: Location<'a>,
@@ -710,6 +753,7 @@ impl<'a> File<'a> {
     }
 }
 
+/// A tag that is used to refer to a single "block" region.
 struct Name<'a> {
     /// Refers to the position of the first letter of the text.
     pub loc: Location<'a>,
@@ -730,6 +774,7 @@ enum TokenData<'a> {
     Comma,
 }
 
+/// A single discrete grammatical element inside the parsable segment of a line.
 struct Token<'a> {
     pub loc: Location<'a>,
     pub data: TokenData<'a>,
