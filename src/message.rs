@@ -37,7 +37,7 @@ pub(crate) fn get_ignores<'a>(commit: &'a Commit) -> Result<HashSet<Ignore<'a>>,
             let path_and_tag: &'a str  = matched_text.as_str();
             if path_and_tag == "*" {
                 let mut hash_set_with_all: HashSet<Ignore> = HashSet::new();
-                hash_set_with_all.insert(Ignore::All());
+                hash_set_with_all.insert(Ignore::All);
                 return Ok(hash_set_with_all);
             }
             else if path_and_tag.starts_with("/") && path_and_tag.contains("#") {

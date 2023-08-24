@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::str::from_utf8;
 use substring::Substring;
 
-use crate::common::{Location, NonWhitespaceLine, BlobFile};
+use crate::common::{BlobFile, Location, NonWhitespaceLine, File, Name};
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::message::Ignore;
 
@@ -32,19 +32,63 @@ lazy_static! {
 }
 
 /// Node storing the information in a single `![[ChangeTogether.With(...)]]` declaration.
+#[derive(Eq, Hash, PartialEq)]
 pub(crate) struct ParsedLink<'a> {
-    pub file: &'a Path,
-    pub tag: Option<&'a str>,
+    pub file: File<'a>,
+    pub tag: Option<Name<'a>>,
 }
 
 // A `ParsedSpec` defines a single `Start...End` block. All names and line numbers are relative to
 /// the new state, not that of the commit being diffed against.
 pub(crate) struct ParsedSpec<'a> {
-    // pub file: &'a Path,
-    pub tag: Option<&'a str>,
+    pub file: PathBuf,
+    pub tag: Option<Name<'a>>,
     pub block: Range<NonZeroUsize>,
     pub content: Range<NonZeroUsize>,
     pub links: HashSet<ParsedLink<'a>>,
+}
+
+/// A `ParsedSpec` defines a single `Start...End` block. All names and line numbers are relative to
+/// the new state, not that of the commit being diffed against.
+struct ParsedSpecBuilder<'a> {
+    pub file: PathBuf,
+    pub tag: Option<Name<'a>>,
+    pub block_start_line: NonZeroUsize,
+    pub last_decl_line: NonZeroUsize,
+    pub links: HashSet<ParsedLink<'a>>,
+}
+
+impl<'a> ParsedSpecBuilder<'a> {
+    pub fn start(file: PathBuf, tag: Option<Name<'a>>, loc: Location<'a>) -> ParsedSpecBuilder<'a> {
+        ParsedSpecBuilder {
+            file,
+            tag,
+            block_start_line: loc.line.num,
+            last_decl_line: loc.line.num,
+            links: HashSet::new(),
+        }
+    }
+
+    pub fn with(&mut self, file: File<'a>, tag: Option<Name<'a>>, loc: Location<'a>) {
+        self.links.insert(ParsedLink { file, tag });
+        self.last_decl_line = loc.line.num;
+    }
+
+    pub fn end(
+        self,
+        tag: Option<Name<'a>>,
+        loc: Location<'a>,
+    ) -> Result<ParsedSpec<'a>, ParseError<'a>> {
+        // TODO: check that tags on start and end match.
+        // TODO: check that content portion is not empty.
+        Ok(ParsedSpec {
+            file: self.file,
+            tag: self.tag,
+            block: self.block_start_line..(loc.line.num.checked_add(1).unwrap()),
+            content: (self.last_decl_line.checked_add(1).unwrap())..loc.line.num,
+            links: self.links,
+        })
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -78,20 +122,23 @@ impl<'a> Parser<'a> {
         // the next step.
         let mut fatal_err: Result<(), Error> = Ok(());
 
-        let parsed_specs = self.blob_files.into_iter().fold(vec![], |mut acc, (_, blob_file)| {
-            // TODO: maybe remove clone?
-            match self.parse_blob_file(blob_file.path.clone(), &blob_file.blob, ignoring) {
-                Ok(mut parsed_specs) => {
-                    acc.append(&mut parsed_specs);
-                }
-                Err(err) => {
-                    // Record the failed compilation, but keep going for other blobs to recover more
-                    // errors.
-                    fatal_err = Err(err);
-                }
-            };
-            acc
-        });
+        let parsed_specs = self
+            .blob_files
+            .into_iter()
+            .fold(vec![], |mut acc, (_, blob_file)| {
+                // TODO: maybe remove clone?
+                match self.parse_blob_file(blob_file.path.clone(), &blob_file.blob, ignoring) {
+                    Ok(mut parsed_specs) => {
+                        acc.append(&mut parsed_specs);
+                    }
+                    Err(err) => {
+                        // Record the failed compilation, but keep going for other blobs to recover more
+                        // errors.
+                        fatal_err = Err(err);
+                    }
+                };
+                acc
+            });
 
         // If even a single compilation failed in a non-recoverable way, we do not proceed.
         if let Err(_) = fatal_err {
@@ -158,9 +205,67 @@ impl<'a> Parser<'a> {
                     Err(e) => return Err(e),
                 };
                 Ok(acc)
-            });
+            })?;
 
-        todo!()
+        self.compile_file(path, decls)
+    }
+
+    /// Take a list of `Decl`s in a given file, and compose them into a list of compiled
+    /// `ParsedSpec`s.
+    fn compile_file(
+        &mut self,
+        // TODO: we should add the file path to the `Location`, rather than piping it through here.
+        path: PathBuf,
+        decls: Vec<Decl<'a>>,
+    ) -> Result<Vec<ParsedSpec<'a>>, Error> {
+        let mut specs = vec![];
+        let mut builder = None;
+
+        for decl in decls {
+            match decl.data {
+                DeclData::Start(maybe_name) => match builder {
+                    Some(_) => {
+                        self.errs.push(ParseError::new(
+                            ParseErrorKind::UnexpectedStartDecl,
+                            decl.loc,
+                        ));
+                        return Err(anyhow!("unexpected start decl"))
+                    }
+                    None => {
+                        builder =
+                            Some(ParsedSpecBuilder::start(path.clone(), maybe_name, decl.loc));
+                    }
+                },
+                DeclData::With(file, maybe_tag) => match &mut builder {
+                    Some(builder) => builder.with(file, maybe_tag, decl.loc),
+                    None => {
+                        self.errs.push(ParseError::new(
+                            ParseErrorKind::UnexpectedWithDecl,
+                            decl.loc,
+                        ));
+                        return Err(anyhow!("unexpected with decl"))
+                    }
+                },
+                DeclData::End(maybe_name) => match builder {
+                    Some(b) => {
+                        match b.end(maybe_name, decl.loc) {
+                            Ok(spec) => specs.push(spec),
+                            Err(errs) => self.errs.push(errs),
+                        }
+                        builder = None
+                    },
+                    None => {
+                        self.errs.push(ParseError::new(
+                            ParseErrorKind::UnexpectedEndDecl,
+                            decl.loc,
+                        ));
+                        return Err(anyhow!("unexpected end decl"))
+                    }
+                },
+            }
+        }
+
+        Ok(specs)
     }
 
     // TODO: our parsing strategy for this is pretty wasteful, since we have to read the line twice
@@ -738,32 +843,6 @@ enum DeclData<'a> {
     Start(Option<Name<'a>>),
     With(File<'a>, Option<Name<'a>>),
     End(Option<Name<'a>>),
-}
-
-/// A parsed filename.
-struct File<'a> {
-    /// Refers to the position of the first letter of the file name, not the surrounding quotes.
-    pub loc: Location<'a>,
-    pub path: &'a Path,
-}
-
-impl<'a> File<'a> {
-    fn new(path: &'a Path, loc: Location<'a>) -> File<'a> {
-        File { loc, path }
-    }
-}
-
-/// A tag that is used to refer to a single "block" region.
-struct Name<'a> {
-    /// Refers to the position of the first letter of the text.
-    pub loc: Location<'a>,
-    pub text: &'a str,
-}
-
-impl<'a> Name<'a> {
-    fn new(text: &'a str, loc: Location<'a>) -> Name<'a> {
-        Name { loc, text }
-    }
 }
 
 enum TokenData<'a> {

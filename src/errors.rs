@@ -61,6 +61,15 @@ pub(crate) enum ParseErrorKind {
 
     #[error("`ChangeTogether.With` declarations must not have a trailing comma.")]
     UnnecessaryComa,
+    
+    #[error("`ChangeTogether.Start` declaration placed incorrectly.")]
+    UnexpectedStartDecl,
+    
+    #[error("`ChangeTogether.With` declaration placed incorrectly.")]
+    UnexpectedWithDecl,
+    
+    #[error("`ChangeTogether.End` declaration placed incorrectly.")]
+    UnexpectedEndDecl,
 }
 
 /// A single parsing error.
@@ -71,7 +80,10 @@ pub(crate) struct ParseError<'a> {
 
 impl<'a> ParseError<'a> {
     pub fn new(kind: ParseErrorKind, loc: Location<'a>) -> ParseError<'a> {
-        ParseError { kind, loc }
+        ParseError {
+            kind,
+            loc,
+        }
     }
 }
 

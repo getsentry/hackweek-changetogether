@@ -78,7 +78,7 @@ fn report_errors<'a>(errors: Vec<errors::ParseError<'a>>) -> Error {
     let msg = errors
         .into_iter()
         // TODO: the zero below is probably incorrect...
-        .map(|e| format!("{}", e.print(0)))
+        .map(|e| e.print(0))
         .collect::<Vec<_>>()
         .join("\n");
 
