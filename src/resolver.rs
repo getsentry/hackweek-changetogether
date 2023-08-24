@@ -23,6 +23,25 @@ struct ResolvedSpec<'a> {
     pub links: HashSet<BlobSegment<'a>>,
 }
 
+// fn is_spec_changed(spec_path: PathBuf, content: Range<NonZeroUsize>, diff: &Diff) -> bool {
+//     for delta in diff.deltas() {
+//         let old_file = delta.old_file();
+//         let new_file = delta.new_file();
+//         if new_file.path() == Some(spec_path.as_path()) {
+//             for hunk in delta.hunks() {
+//                 for line in hunk.lines_in_hunk() {
+//                     if let Ok((line_number, _)) = line {
+//                         if content.contains(&line_number) {
+//                             return true;
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     }
+//     false
+// }
+
 fn resolve_spec(link: &ParsedLink, diff: &Diff) -> Result<(), Error> {
     let file_path = link.file.path;
     for delta in diff.deltas() {
@@ -32,13 +51,13 @@ fn resolve_spec(link: &ParsedLink, diff: &Diff) -> Result<(), Error> {
             }
         }
     }
-    Err(anyhow!("Linked file not changed"))
+    Err(anyhow!("Linked file not changed: {}", file_path.to_string_lossy()))
 }
 
 pub(crate) fn resolve<'a>(
     specs: Vec<ParsedSpec>,
     diff: &Diff,
-) -> Result<(), Vec<Error>> {
+) -> Result<(), Error> {
     let mut errs = vec![];
 
     for spec in &specs {
@@ -54,6 +73,10 @@ pub(crate) fn resolve<'a>(
     if errs.is_empty() {
         Ok(())
     } else {
-        Err(errs)
+        let combine_errors = errs.iter()
+                            .map(|e| e.to_string())
+                            .collect::<Vec<String>>()
+                            .join("\n");
+        Err(anyhow!(format!("Found {} errors:\n{}", errs.len(), combine_errors)))
     }
 }

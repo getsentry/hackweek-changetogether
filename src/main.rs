@@ -69,7 +69,7 @@ fn app(repo: Repository, target_rev: String) -> Result<(), Error> {
         .parse(&ignores)
         .map_err(|errs| report_errors(errs))?;
     // TODO: better resolved error handling
-    resolve(parsed_specs, &diff).map_err(|_| anyhow!("TODO: collate resolution errors"))
+    resolve(parsed_specs, &diff)
 }
 
 /// Helper function for conveniently displaying all discovered errors from a single phase.
