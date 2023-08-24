@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Error};
 use common::BlobFile;
-use git2::{Commit, Diff, DiffDelta, Repository, Oid};
+use git2::{Commit, Diff, DiffDelta, Oid, Repository};
 use std::collections::HashMap;
 use std::error::Error as Err;
 use structopt::StructOpt;
@@ -49,16 +49,15 @@ fn app(repo: Repository, target_rev: String) -> Result<(), Error> {
         Some(&base_commit.tree()?),
         None,
     )?;
-    let blob_map =
-        deltas_to_file_ids(&diff, &target_commit, &repo)?
-            .into_iter()
-            .try_fold(HashMap::new(), |mut acc, file_id| {
-                let blob = repo
-                    .find_blob(file_id.oid)
-                    .map_err(|_| anyhow!("could not find blob"))?;
-                acc.insert(file_id.oid, BlobFile::new(file_id.path, blob));
-                Ok::<HashMap<Oid, BlobFile>, Error>(acc)
-            })?;
+    let blob_map = deltas_to_file_ids(&diff, &target_commit, &repo)?
+        .into_iter()
+        .try_fold(HashMap::new(), |mut acc, file_id| {
+            let blob = repo
+                .find_blob(file_id.oid)
+                .map_err(|_| anyhow!("could not find blob"))?;
+            acc.insert(file_id.oid, BlobFile::new(file_id.path, blob));
+            Ok::<HashMap<Oid, BlobFile>, Error>(acc)
+        })?;
 
     // Get the ignores from the commit message, parse all of the files touched by this diff, then
     // resolve all of the references in that parsed output. That should give us enough information
@@ -134,26 +133,126 @@ fn delta_to_file_id<'a>(
     ))
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use crate::app;
-//     use crate::testing::helpers::{create_test_repo, TestCommit};
-//     use std::{collections::HashMap, error::Error as Err};
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
 
-//     #[test]
-//     fn test_good_no_change_together() -> Result<(), Box<dyn Err>> {
-//         let data = vec![
-//             TestCommit {
-//                 msg: "First commit".into(),
-//                 files: HashMap::from([("a.md", "# Original\n")]),
-//             },
-//             TestCommit {
-//                 msg: "Second commit".into(),
-//                 files: HashMap::from([("a.md", "# Changed\n")]),
-//             },
-//         ];
-//         let repo = create_test_repo(&data)?;
+    use crate::app;
+    use crate::testing::helpers::{create_test_repo, TestCommit};
+    use std::{collections::HashMap, error::Error as Err};
 
-//         Ok(app(repo, "HEAD".into())?)
-//     }
-// }
+    #[test]
+    fn test_good_example() -> Result<(), Box<dyn Err>> {
+        let dir = TempDir::new()?;
+
+        let py1_path = dir.path().join("src/a.py");
+        let py1_path_str: &str = &py1_path.to_string_lossy();
+        let py1_content = format!(
+            r##"
+        # ![[ChangeTogether.Start]]
+        # ![[ChangeTogether.With("{}")]]
+        print("We are in python now")
+        # ![[ChangeTogether.End]]
+"##,
+            dir.path().join("doc/b.md").to_string_lossy()
+        );
+
+        let md1_path = dir.path().join("doc/b.md");
+        let md1_path_str: &str = &md1_path.to_string_lossy();
+        let md1_content = r##"
+        # These are the original docs
+"##;
+
+        let py2_path = dir.path().join("src/a.py");
+        let py2_path_str: &str = &py2_path.to_string_lossy();
+        let py2_content = format!(
+            r##"
+# ![[ChangeTogether.Start]]
+# ![[ChangeTogether.With("{}")]]
+print("We are still in python")
+# ![[ChangeTogether.End]]
+"##,
+            dir.path().join("doc/b.md").to_string_lossy()
+        );
+
+        let md2_path = dir.path().join("doc/b.md");
+        let md2_path_str: &str = &md2_path.to_string_lossy();
+        let md2_content = r##"
+        # These are some docs that we have changed
+"##;
+
+        let data = vec![
+            TestCommit {
+                msg: "First commit".into(),
+                files: HashMap::from([
+                    (py1_path_str, py1_content.as_str()),
+                    (md1_path_str, md1_content),
+                ]),
+            },
+            TestCommit {
+                msg: "Second commit".into(),
+                files: HashMap::from([
+                    (py2_path_str, py2_content.as_str()),
+                    (md2_path_str, md2_content),
+                ]),
+            },
+        ];
+        let repo = create_test_repo(&dir, &data)?;
+
+        Ok(app(repo, "HEAD".into())?)
+    }
+
+    #[test]
+    fn test_bad_example() -> Result<(), Box<dyn Err>> {
+        let dir = TempDir::new()?;
+
+        let py1_path = dir.path().join("src/a.py");
+        let py1_path_str: &str = &py1_path.to_string_lossy();
+        let py1_content = format!(
+            r##"
+        # ![[ChangeTogether.Start]]
+        # ![[ChangeTogether.With("{}")]]
+        print("We are in python now")
+        # ![[ChangeTogether.End]]
+"##,
+            dir.path().join("doc/b.md").to_string_lossy()
+        );
+
+        let md1_path = dir.path().join("doc/b.md");
+        let md1_path_str: &str = &md1_path.to_string_lossy();
+        let md1_content = r##"
+        # These are the original docs
+"##;
+
+        let py2_path = dir.path().join("src/a.py");
+        let py2_path_str: &str = &py2_path.to_string_lossy();
+        let py2_content = format!(
+            r##"
+# ![[ChangeTogether.Start]]
+# ![[ChangeTogether.With("{}")]]
+print("We are still in python")
+# ![[ChangeTogether.End]]
+"##,
+            dir.path().join("doc/b.md").to_string_lossy()
+        );
+
+        let data = vec![
+            TestCommit {
+                msg: "First commit".into(),
+                files: HashMap::from([
+                    (py1_path_str, py1_content.as_str()),
+                    (md1_path_str, md1_content),
+                ]),
+            },
+            TestCommit {
+                msg: "Second commit".into(),
+                files: HashMap::from([
+                    (py2_path_str, py2_content.as_str()),
+                ]),
+            },
+        ];
+        let repo = create_test_repo(&dir, &data)?;
+
+        Ok(app(repo, "HEAD".into())?)
+    }
+}

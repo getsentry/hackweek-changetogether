@@ -132,7 +132,7 @@ impl<'a> Parser<'a> {
             None => return Ok(vec![]),
         };
 
-        println!("check: {:#?}", ext_regex);
+        // println!("check: {:#?}", ext_regex);
         // The basic unit of parsing is the line.
         let decls = utf8
             .split(|ch| ch == '\n')
@@ -149,12 +149,12 @@ impl<'a> Parser<'a> {
                 }
             })
             .try_fold(vec![], |mut acc, line| {
-                println!("parsing: {:#?}", line);
+                // println!("parsing: {:#?}", line);
                 match self.parse_line(line, ext_regex) {
                     Ok(decl_text) => match decl_text {
                         None => {}
                         Some(decl) => {
-                            println!("decl: {:#?}", decl);
+                            // println!("decl: {:#?}", decl);
                             acc.push(decl);
                         }
                     },
@@ -176,7 +176,7 @@ impl<'a> Parser<'a> {
     ) -> Result<Vec<ParsedSpec<'a>>, Error> {
         let mut specs = vec![];
         let mut builder = None;
-        println!("compiling decls: {:#?}", decls);
+        // println!("compiling decls: {:#?}", decls);
 
         for decl in decls {
             match decl.data {
@@ -238,7 +238,7 @@ impl<'a> Parser<'a> {
             Some(unbracketed_text) => unbracketed_text,
             None => return Ok(None),
         };
-        println!("segment: {:#?}", parsable_segment);
+        // println!("segment: {:#?}", parsable_segment);
 
         match self.parse_decl(line, parsable_segment) {
             Ok(decl) => Ok(Some(decl)),
@@ -268,7 +268,7 @@ impl<'a> Parser<'a> {
         };
         let comment_text_str = comment_text.as_str();
         let comment_text_offset = comment_text.start();
-        println!("comment_text: {:#?}", comment_text_str);
+        // println!("comment_text: {:#?}", comment_text_str);
 
         // This is definitely a non-empty comment line, let's see if it is a `ChangeTogether` line,
         // or a close misspelling of one.
@@ -368,9 +368,9 @@ impl<'a> Parser<'a> {
         line: NonWhitespaceLine<'a>,
         data: ParsableLineSegment<'a>,
     ) -> Result<Decl<'a>, Error> {
-        println!("lexing: {:#?}", data);
+        // println!("lexing: {:#?}", data);
         let mut tokens = self.lex_decl(data.text, line, data.pos)?;
-        println!("tokens: {:#?}", tokens);
+        // println!("tokens: {:#?}", tokens);
         let method = match tokens.pop_front() {
             None => {
                 self.errs.push(ParseError::new(
@@ -450,10 +450,10 @@ impl<'a> Parser<'a> {
         let mut from = 0;
         let mut in_string = false;
         for (i, ch) in text.chars().enumerate() {
-            println!("for char: {:#?}, text: {}", ch, text);
+            // println!("for char: {:#?}, text: {}", ch, text);
             // Is this the end of a string?
             if in_string {
-                println!("in_string: {:#?}, from: {}, tokens: {}", ch, from, tokens.len());
+                // println!("in_string: {:#?}, from: {}, tokens: {}", ch, from, tokens.len());
                 if ch == '"' {
                     in_string = false;
                     tokens.push_back(Token {
@@ -482,7 +482,7 @@ impl<'a> Parser<'a> {
                 found_token = Some(TokenData::CloseParen);
             }
             if let Some(token_data) = found_token {
-                println!("found token : {:#?}", &token_data);
+                // println!("found token : {:#?}", &token_data);
                 if from < i {
                     tokens.push_back(Token {
                         loc: Location::new(line, from + offset, i - from),
@@ -494,7 +494,7 @@ impl<'a> Parser<'a> {
                     data: token_data,
                 });
                 from = i + 1;
-                println!("after found_token: {:#?}, from: {}", tokens, from);
+                // println!("after found_token: {:#?}, from: {}", tokens, from);
                 continue;
             }
 
@@ -511,7 +511,7 @@ impl<'a> Parser<'a> {
 
             // Only (valid) option left: we are inside an identifier.
             if ch.is_alphanumeric() {
-                println!("for letter: {:#?}, from: {}", ch, from);
+                // println!("for letter: {:#?}, from: {}", ch, from);
                 continue;
             }
 
@@ -1045,7 +1045,7 @@ mod tests {
         // ![[ChangeTogether.With("/foo/bar.rs")]]
         // ![[ChangeTogether.With("/baz/qux.rs")]]
         fn main() {
-            println!("Hello World!");
+            // println!("Hello World!");
         }
         // ![[ChangeTogether.End]]
 "##,
@@ -1090,7 +1090,7 @@ mod tests {
         // ![[ChangeTogether.With("/foo/bar(![[]],).rs")]]
         // ![[ChangeTogether.With("/baz/qux(![[]],).rs")]]
         fn main() {
-            println!("Hello World!");
+            // println!("Hello World!");
         }
         // ![[ChangeTogether.End]]
 "##,
@@ -1135,7 +1135,7 @@ mod tests {
         // ![[ChangeTogether.With("/foo/bar.rs",tagA)]]
         // ![[ChangeTogether.With("/baz/qux.rs",tagB)]]
         fn main() {
-            println!("Hello World!");
+            // println!("Hello World!");
         }
         // ![[ChangeTogether.End]]
 "##,

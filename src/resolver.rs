@@ -43,15 +43,17 @@ struct ResolvedSpec<'a> {
 // }
 
 fn resolve_spec(link: &ParsedLink, diff: &Diff) -> Result<(), Error> {
-    let file_path = link.file.path;
+    let foo = link.file.path.to_string_lossy();
+    let file_path = foo.trim_start_matches('/');
     for delta in diff.deltas() {
         if let Some(delta_path) = delta.new_file().path() {
-            if delta_path == file_path {
+            println!("delta path: {:#?}, file path: {}", delta_path, file_path);
+            if delta_path.to_string_lossy() == file_path {
                 return Ok(());
             }
         }
     }
-    Err(anyhow!("Linked file not changed: {}", file_path.to_string_lossy()))
+    Err(anyhow!("Linked file not changed: {}", file_path))
 }
 
 pub(crate) fn resolve<'a>(
@@ -59,6 +61,7 @@ pub(crate) fn resolve<'a>(
     diff: &Diff,
 ) -> Result<(), Error> {
     let mut errs = vec![];
+    println!("specs: {:#?}", specs);
 
     for spec in &specs {
         for link in spec.links.iter() {

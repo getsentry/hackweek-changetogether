@@ -1,7 +1,7 @@
 #[cfg(test)]
 pub(crate) mod helpers {
     use anyhow::{Context, Error};
-    use git2::{IndexEntry, IndexTime, Oid, Repository, Blob};
+    use git2::{IndexEntry, IndexTime, Oid, Repository};
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -9,7 +9,7 @@ pub(crate) mod helpers {
 
     pub(crate) struct TestCommit<'a> {
         pub msg: &'a str,
-        pub files: HashMap<&'static str, &'static str>,
+        pub files: HashMap<&'a str, &'a str>,
     }
 
     /// Test against a custom git "file, represented as a blob. Useful for the parser. This function
