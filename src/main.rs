@@ -167,10 +167,10 @@ mod tests {
         let py2_path_str: &str = &py2_path.to_string_lossy();
         let py2_content = format!(
             r##"
-# ![[ChangeTogether.Start]]
-# ![[ChangeTogether.With("{}")]]
-print("We are still in python")
-# ![[ChangeTogether.End]]
+        # ![[ChangeTogether.Start]]
+        # ![[ChangeTogether.With("{}")]]
+        print("We are still in python")
+        # ![[ChangeTogether.End]]
 "##,
             dir.path().join("doc/b.md").to_string_lossy()
         );
@@ -228,13 +228,20 @@ print("We are still in python")
         let py2_path_str: &str = &py2_path.to_string_lossy();
         let py2_content = format!(
             r##"
-# ![[ChangeTogether.Start]]
-# ![[ChangeTogether.With("{}")]]
-print("We are still in python")
-# ![[ChangeTogether.End]]
+        # ![[ChangeTogether.Start]]
+        # ![[ChangeTogether.With("{}")]]
+        print("We are still in python")
+        # ![[ChangeTogether.End]]
 "##,
             dir.path().join("doc/b.md").to_string_lossy()
         );
+
+        // Note that this file has not changed!
+        let md2_path = dir.path().join("doc/b.md");
+        let md2_path_str: &str = &md2_path.to_string_lossy();
+        let md2_content = r##"
+        # These are the original docs
+"##;
 
         let data = vec![
             TestCommit {
@@ -248,11 +255,26 @@ print("We are still in python")
                 msg: "Second commit".into(),
                 files: HashMap::from([
                     (py2_path_str, py2_content.as_str()),
+                    (md2_path_str, md2_content),
                 ]),
             },
         ];
         let repo = create_test_repo(&dir, &data)?;
 
-        Ok(app(repo, "HEAD".into())?)
+        match app(repo, "HEAD".into()) {
+            Err(err) => {
+                assert_eq!(
+                    format!("{}", err),
+                    format!(
+                        "Found 1 errors:\nLinked file not changed: {}",
+                        md2_path.to_string_lossy().trim_start_matches('/')
+                    )
+                );
+                Ok(())
+            }
+            Ok(_) => {
+                panic!("should not succeed!")
+            }
+        }
     }
 }
