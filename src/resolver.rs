@@ -1,12 +1,12 @@
-use git2::{Blob, Deltas};
+use git2::{Blob, Diff};
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::path::PathBuf;
 
-use anyhow::Error;
+use anyhow::{anyhow, Error};
 
-use crate::parser::ParsedSpec;
+use crate::parser::{ParsedSpec, ParsedLink};
 
 /// Some lines from a git blob.
 struct BlobSegment<'a> {
@@ -23,9 +23,37 @@ struct ResolvedSpec<'a> {
     pub links: HashSet<BlobSegment<'a>>,
 }
 
+fn resolve_spec(link: &ParsedLink, diff: &Diff) -> Result<(), Error> {
+    let file_path = link.file;
+    for delta in diff.deltas() {
+        if let Some(delta_path) = delta.new_file().path() {
+            if delta_path == file_path {
+                return Ok(());
+            }
+        }
+    }
+    Err(anyhow!("Linked file not changed"))
+}
+
 pub(crate) fn resolve<'a>(
     specs: Vec<ParsedSpec>,
-    deltas: Deltas,
+    diff: &Diff,
 ) -> Result<(), Vec<Error>> {
-    todo!()
+    let mut errs = vec![];
+
+    for spec in &specs {
+        for link in spec.links.iter() {
+            match resolve_spec(link, diff) {
+                Ok(()) => {},
+                Err(err) => {
+                    errs.push(err);
+                }
+            };
+        }
+    }
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        Err(errs)
+    }
 }
