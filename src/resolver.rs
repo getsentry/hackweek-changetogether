@@ -61,7 +61,6 @@ pub(crate) fn resolve<'a>(
     diff: &Diff,
 ) -> Result<(), Error> {
     let mut errs = vec![];
-    println!("specs: {:#?}", specs);
 
     for spec in &specs {
         for link in spec.links.iter() {
