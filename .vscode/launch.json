@@ -1,0 +1,68 @@
+{
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "test-mod parser::tests",
+            "program": "${workspaceFolder}/target/debug/deps/hackweek_changetogether-4c669715dd082586",
+            "args": [
+                "parser::tests",
+                "--nocapture"
+            ],
+            "cwd": "${workspaceFolder}",
+            "sourceMap": {},
+            "sourceLanguages": [
+                "rust"
+            ],
+            "env": {
+                "RUST_BACKTRACE": "short",
+                "BASH_SILENCE_DEPRECATION_WARNING": "1",
+                "COMMAND_MODE": "unix2003",
+                "EDITOR": "nvim",
+                "GITHUB_DIR": "/Users/azaslavsky/github",
+                "HOME": "/Users/azaslavsky",
+                "HOMEBREW_BUNDLE_FILE": "/Users/azaslavsky/github/azrc/osx/homebrew/Brewfile",
+                "HOMEBREW_CELLAR": "/opt/homebrew/Cellar",
+                "HOMEBREW_PREFIX": "/opt/homebrew",
+                "HOMEBREW_REPOSITORY": "/opt/homebrew",
+                "INFOPATH": "/opt/homebrew/share/info:",
+                "LOGNAME": "azaslavsky",
+                "LaunchInstanceID": "494DA482-51C4-4494-A3BA-67CBFBC53477",
+                "MANPATH": "/opt/homebrew/share/man:",
+                "MallocNanoZone": "0",
+                "ORIGINAL_XDG_CURRENT_DESKTOP": "undefined",
+                "PATH": "/Users/azaslavsky/.pyenv/shims:/Users/azaslavsky/.volta/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/azaslavsky/.volta/bin:/Users/azaslavsky/github/git-fuzzy/bin:/Users/azaslavsky/bin:/usr/local/sbin:/Users/azaslavsky/.cargo/bin:/opt/homebrew/bin:/Users/azaslavsky/.volta/bin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/Users/azaslavsky/.rvm/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/azaslavsky/.cargo/bin:/opt/homebrew/opt/fzf/bin",
+                "PWD": "/",
+                "PYENV_ROOT": "/Users/azaslavsky/.pyenv",
+                "PYENV_SHELL": "bash",
+                "SECURITYSESSIONID": "186b7",
+                "SENTRY_DIR": "/Users/azaslavsky/getsentry",
+                "SENTRY_INSTRUMENTATION": "1",
+                "SENTRY_POST_MERGE_AUTO_UPDATE": "1",
+                "SENTRY_SPA_DSN": "https://863de587a34a48c4a4ef1a9238fdb0b1@o19635.ingest.sentry.io/5270453",
+                "SHELL": "/bin/bash",
+                "SHLVL": "1",
+                "SSH_AUTH_SOCK": "/private/tmp/com.apple.launchd.p01q291nNt/Listeners",
+                "TMPDIR": "/var/folders/mw/vmgkmt5s0nn94j6j6lk1mtv00000gn/T/",
+                "USER": "azaslavsky",
+                "VISUAL": "nvim",
+                "VOLTA_HOME": "/Users/azaslavsky/.volta",
+                "VSCODE_AMD_ENTRYPOINT": "vs/workbench/api/node/extensionHostProcess",
+                "VSCODE_CODE_CACHE_PATH": "/Users/azaslavsky/Library/Application Support/Code/CachedData/6c3e3dba23e8fadc360aed75ce363ba185c49794",
+                "VSCODE_CRASH_REPORTER_PROCESS_TYPE": "extensionHost",
+                "VSCODE_CWD": "/",
+                "VSCODE_HANDLES_UNCAUGHT_ERRORS": "true",
+                "VSCODE_IPC_HOOK": "/Users/azaslavsky/Library/Application Support/Code/1.81-main.sock",
+                "VSCODE_NLS_CONFIG": "{\"locale\":\"en-us\",\"osLocale\":\"en-us\",\"availableLanguages\":{},\"_languagePackSupport\":true}",
+                "VSCODE_PID": "695",
+                "XPC_FLAGS": "0x0",
+                "XPC_SERVICE_NAME": "application.com.microsoft.VSCode.9018759.9018765",
+                "_": "/Applications/Visual Studio Code.app/Contents/MacOS/Electron",
+                "__CFBundleIdentifier": "com.microsoft.VSCode",
+                "__CF_USER_TEXT_ENCODING": "0x1F5:0x0:0x0",
+                "ELECTRON_RUN_AS_NODE": "1",
+                "VSCODE_L10N_BUNDLE_LOCATION": ""
+            }
+        }
+    ]
+}

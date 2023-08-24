@@ -73,6 +73,7 @@ pub(crate) enum ParseErrorKind {
 }
 
 /// A single parsing error.
+#[derive(Debug)]
 pub(crate) struct ParseError<'a> {
     pub kind: ParseErrorKind,
     pub loc: Location<'a>,

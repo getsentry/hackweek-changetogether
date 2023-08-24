@@ -2,6 +2,7 @@ use std::{num::NonZeroUsize, path::{PathBuf, Path}};
 
 use git2::{Oid, Blob};
 
+#[derive(Debug)]
 pub(crate) struct FileOid {
     pub path: PathBuf,
     pub oid: Oid,
@@ -13,6 +14,7 @@ impl FileOid {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct BlobFile<'a> {
     pub path: PathBuf,
     pub blob: Blob<'a>,
@@ -25,7 +27,7 @@ impl<'a> BlobFile<'a> {
 }
 
 /// Any line in a relevant git blob that is not pure whitespace.
-#[derive(Copy, Clone, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct NonWhitespaceLine<'a> {
     pub num: NonZeroUsize,
     pub text: &'a str,
@@ -33,7 +35,7 @@ pub(crate) struct NonWhitespaceLine<'a> {
 
 /// A location within a `BlobFile`, noting the line text, line number, position within that line
 /// number, and the length of the span in question.
-#[derive(Copy, Clone, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct Location<'a> {
     pub line: NonWhitespaceLine<'a>,
     pub pos: usize,
@@ -55,7 +57,7 @@ impl<'a> Location<'a> {
 }
 
 /// A parsed filename.
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct File<'a> {
     /// Refers to the position of the first letter of the file name, not the surrounding quotes.
     pub loc: Location<'a>,
@@ -69,7 +71,7 @@ impl<'a> File<'a> {
 }
 
 /// A tag that is used to refer to a single "block" region.
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct Name<'a> {
     /// Refers to the position of the first letter of the text.
     pub loc: Location<'a>,

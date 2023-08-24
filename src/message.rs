@@ -1,13 +1,13 @@
 extern crate regex;
 
-use std::{path::PathBuf, collections::HashSet};
+use std::{path::PathBuf, collections::BTreeSet};
 
 use anyhow::Error;
 use git2::Commit;
 use regex::Regex;
 
 /// Describes a commit-message level `CHANGE_TOGETHER_IGNORE` statement.
-#[derive(Debug, Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
 pub(crate) enum Ignore<'a> {
     /// A commit-message ignore like `CHANGE_TOGETHER_IGNORE=/path/to/my/file`
     File(PathBuf),
@@ -23,12 +23,12 @@ pub(crate) enum Ignore<'a> {
 }
 
 // Returns a list of ignored files/tags to be disregarded during the resolving process.
-pub(crate) fn get_ignores<'a>(commit: &'a Commit) -> Result<HashSet<Ignore<'a>>, Error> {
+pub(crate) fn get_ignores<'a>(commit: &'a Commit) -> Result<BTreeSet<Ignore<'a>>, Error> {
     let commit_message = commit.message().unwrap_or("");
     let pattern = r"CHANGE_TOGETHER_IGNORE=([^\s]+)";
     let re = Regex::new(pattern).unwrap();
 
-    let mut ignore_list: HashSet<Ignore> = HashSet::new();
+    let mut ignore_list: BTreeSet<Ignore> = BTreeSet::new();
 
     // Iterate through all matches in the commit message and collect them
     // TODO: add error handling
@@ -36,7 +36,7 @@ pub(crate) fn get_ignores<'a>(commit: &'a Commit) -> Result<HashSet<Ignore<'a>>,
         if let Some(matched_text) = captures.get(1) {
             let path_and_tag: &'a str  = matched_text.as_str();
             if path_and_tag == "*" {
-                let mut hash_set_with_all: HashSet<Ignore> = HashSet::new();
+                let mut hash_set_with_all: BTreeSet<Ignore> = BTreeSet::new();
                 hash_set_with_all.insert(Ignore::All);
                 return Ok(hash_set_with_all);
             }

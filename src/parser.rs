@@ -3,7 +3,7 @@ use edit_distance::edit_distance;
 use git2::{Blob, Oid};
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, BTreeSet, VecDeque};
 use std::ffi::OsStr;
 use std::num::NonZeroUsize;
 use std::ops::Range;
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::str::from_utf8;
 use substring::Substring;
 
-use crate::common::{BlobFile, Location, NonWhitespaceLine, File, Name};
+use crate::common::{BlobFile, File, Location, Name, NonWhitespaceLine};
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::message::Ignore;
 
@@ -20,19 +20,19 @@ lazy_static! {
 
     // This purposefully includes extra characters so that we can catch common misspellings.
     static ref UNWRAPPING_REGEX: Regex =
-        Regex::new(r####"(?P<bang>!*)(?P<gap0>\s*)(?P<open>\[+)(?P<gap1>\s*)(?P<keyword>\w{12,}\.)(?P<decl>.*)(?P<close>\]+)(?P<extra>.*)*$"####).unwrap();
+        Regex::new(r####"(?P<bang>!*)(?P<gap0>\s*)(?P<open>\[+)(?P<gap1>\s*)(?P<keyword>\w{12,}\.)(?P<decl>.*)(?P<close>\]{2,})(?P<extra>.*)$"####).unwrap();
 
     // TODO: we probably want some external source (or maybe even a config you can pass in?) for the
     // comment mapping, but we can use this for now.
     static ref EXTENSION_TO_COMMENT_REGEX: HashMap<&'static OsStr, Regex> = HashMap::from([
-        (OsStr::new(".rs"), Regex::new(r"^\s*\/\/\\s*(?P<text>.*)$").unwrap()),
-        (OsStr::new(".py"), Regex::new(r"^\s#\s*(?P<text>.*)$").unwrap()),
-        (OsStr::new(".md"), Regex::new(r"^\s<!--\s*(?P<text>.*)-->$").unwrap()),
+        (OsStr::new("rs"), Regex::new(r"^\s*//\s*(?P<text>.*)$").unwrap()),
+        (OsStr::new("py"), Regex::new(r"^\s*#\s*(?P<text>.*)$").unwrap()),
+        (OsStr::new("md"), Regex::new(r"^\s*<!--\s*(?P<text>.*?)\s*-->$").unwrap()),
     ]);
 }
 
 /// Node storing the information in a single `![[ChangeTogether.With(...)]]` declaration.
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct ParsedLink<'a> {
     pub file: File<'a>,
     pub tag: Option<Name<'a>>,
@@ -40,63 +40,16 @@ pub(crate) struct ParsedLink<'a> {
 
 // A `ParsedSpec` defines a single `Start...End` block. All names and line numbers are relative to
 /// the new state, not that of the commit being diffed against.
+#[derive(Debug)]
 pub(crate) struct ParsedSpec<'a> {
     pub file: PathBuf,
     pub tag: Option<Name<'a>>,
     pub block: Range<NonZeroUsize>,
     pub content: Range<NonZeroUsize>,
-    pub links: HashSet<ParsedLink<'a>>,
+    pub links: BTreeSet<ParsedLink<'a>>,
 }
 
-/// A `ParsedSpec` defines a single `Start...End` block. All names and line numbers are relative to
-/// the new state, not that of the commit being diffed against.
-struct ParsedSpecBuilder<'a> {
-    pub file: PathBuf,
-    pub tag: Option<Name<'a>>,
-    pub block_start_line: NonZeroUsize,
-    pub last_decl_line: NonZeroUsize,
-    pub links: HashSet<ParsedLink<'a>>,
-}
-
-impl<'a> ParsedSpecBuilder<'a> {
-    pub fn start(file: PathBuf, tag: Option<Name<'a>>, loc: Location<'a>) -> ParsedSpecBuilder<'a> {
-        ParsedSpecBuilder {
-            file,
-            tag,
-            block_start_line: loc.line.num,
-            last_decl_line: loc.line.num,
-            links: HashSet::new(),
-        }
-    }
-
-    pub fn with(&mut self, file: File<'a>, tag: Option<Name<'a>>, loc: Location<'a>) {
-        self.links.insert(ParsedLink { file, tag });
-        self.last_decl_line = loc.line.num;
-    }
-
-    pub fn end(
-        self,
-        tag: Option<Name<'a>>,
-        loc: Location<'a>,
-    ) -> Result<ParsedSpec<'a>, ParseError<'a>> {
-        // TODO: check that tags on start and end match.
-        // TODO: check that content portion is not empty.
-        Ok(ParsedSpec {
-            file: self.file,
-            tag: self.tag,
-            block: self.block_start_line..(loc.line.num.checked_add(1).unwrap()),
-            content: (self.last_decl_line.checked_add(1).unwrap())..loc.line.num,
-            links: self.links,
-        })
-    }
-}
-
-#[derive(Copy, Clone)]
-struct ParsableLineSegment<'a> {
-    pub text: &'a str,
-    pub pos: usize,
-}
-
+#[derive(Debug)]
 pub(crate) struct Parser<'a> {
     blob_files: &'a HashMap<Oid, BlobFile<'a>>,
     errs: Vec<ParseError<'a>>,
@@ -113,7 +66,7 @@ impl<'a> Parser<'a> {
     /// Parse all of the file `blobs` supplied to this parser.
     pub fn parse(
         mut self,
-        ignoring: &'a HashSet<Ignore<'a>>,
+        ignoring: &'a BTreeSet<Ignore<'a>>,
     ) -> Result<Vec<ParsedSpec<'a>>, Vec<ParseError<'a>>> {
         // Clear errors, just in case the `Parser` is accidentally re-used.
         self.errs = vec![];
@@ -132,8 +85,8 @@ impl<'a> Parser<'a> {
                         acc.append(&mut parsed_specs);
                     }
                     Err(err) => {
-                        // Record the failed compilation, but keep going for other blobs to recover more
-                        // errors.
+                        // Record the failed compilation, but keep going for other blobs to recover
+                        // more errors.
                         fatal_err = Err(err);
                     }
                 };
@@ -151,7 +104,7 @@ impl<'a> Parser<'a> {
         &mut self,
         path: PathBuf,
         blob: &'a Blob<'a>,
-        ignoring: &'a HashSet<Ignore<'a>>,
+        ignoring: &'a BTreeSet<Ignore<'a>>,
     ) -> Result<Vec<ParsedSpec<'a>>, Error> {
         // Short-circuit: if the user wants to ignore everything, just return an empty vector.
         if ignoring.contains(&Ignore::All) {
@@ -179,6 +132,7 @@ impl<'a> Parser<'a> {
             None => return Ok(vec![]),
         };
 
+        println!("check: {:#?}", ext_regex);
         // The basic unit of parsing is the line.
         let decls = utf8
             .split(|ch| ch == '\n')
@@ -195,10 +149,12 @@ impl<'a> Parser<'a> {
                 }
             })
             .try_fold(vec![], |mut acc, line| {
+                println!("parsing: {:#?}", line);
                 match self.parse_line(line, ext_regex) {
                     Ok(decl_text) => match decl_text {
                         None => {}
                         Some(decl) => {
+                            println!("decl: {:#?}", decl);
                             acc.push(decl);
                         }
                     },
@@ -220,6 +176,7 @@ impl<'a> Parser<'a> {
     ) -> Result<Vec<ParsedSpec<'a>>, Error> {
         let mut specs = vec![];
         let mut builder = None;
+        println!("compiling decls: {:#?}", decls);
 
         for decl in decls {
             match decl.data {
@@ -229,7 +186,7 @@ impl<'a> Parser<'a> {
                             ParseErrorKind::UnexpectedStartDecl,
                             decl.loc,
                         ));
-                        return Err(anyhow!("unexpected start decl"))
+                        return Err(anyhow!("unexpected start decl"));
                     }
                     None => {
                         builder =
@@ -243,7 +200,7 @@ impl<'a> Parser<'a> {
                             ParseErrorKind::UnexpectedWithDecl,
                             decl.loc,
                         ));
-                        return Err(anyhow!("unexpected with decl"))
+                        return Err(anyhow!("unexpected with decl"));
                     }
                 },
                 DeclData::End(maybe_name) => match builder {
@@ -253,13 +210,11 @@ impl<'a> Parser<'a> {
                             Err(errs) => self.errs.push(errs),
                         }
                         builder = None
-                    },
+                    }
                     None => {
-                        self.errs.push(ParseError::new(
-                            ParseErrorKind::UnexpectedEndDecl,
-                            decl.loc,
-                        ));
-                        return Err(anyhow!("unexpected end decl"))
+                        self.errs
+                            .push(ParseError::new(ParseErrorKind::UnexpectedEndDecl, decl.loc));
+                        return Err(anyhow!("unexpected end decl"));
                     }
                 },
             }
@@ -283,6 +238,7 @@ impl<'a> Parser<'a> {
             Some(unbracketed_text) => unbracketed_text,
             None => return Ok(None),
         };
+        println!("segment: {:#?}", parsable_segment);
 
         match self.parse_decl(line, parsable_segment) {
             Ok(decl) => Ok(Some(decl)),
@@ -311,9 +267,11 @@ impl<'a> Parser<'a> {
             Some(text) => text,
         };
         let comment_text_str = comment_text.as_str();
+        let comment_text_offset = comment_text.start();
+        println!("comment_text: {:#?}", comment_text_str);
 
-        // This is definitely a non-empty comment line, let's see if it is a `ChangeTogether` line, or a
-        // close misspelling of one.
+        // This is definitely a non-empty comment line, let's see if it is a `ChangeTogether` line,
+        // or a close misspelling of one.
         let matches = match UNWRAPPING_REGEX.captures(comment_text_str) {
             Some(matches) => matches,
             None => return Ok(None),
@@ -400,7 +358,7 @@ impl<'a> Parser<'a> {
 
         Ok(Some(ParsableLineSegment {
             text: decl.as_str(),
-            pos: decl.start(),
+            pos: decl.start() + comment_text_offset,
         }))
     }
 
@@ -410,7 +368,9 @@ impl<'a> Parser<'a> {
         line: NonWhitespaceLine<'a>,
         data: ParsableLineSegment<'a>,
     ) -> Result<Decl<'a>, Error> {
+        println!("lexing: {:#?}", data);
         let mut tokens = self.lex_decl(data.text, line, data.pos)?;
+        println!("tokens: {:#?}", tokens);
         let method = match tokens.pop_front() {
             None => {
                 self.errs.push(ParseError::new(
@@ -487,15 +447,18 @@ impl<'a> Parser<'a> {
         // TODO: maybe return iterator instead of vec?
     ) -> Result<VecDeque<Token<'a>>, Error> {
         let mut tokens = VecDeque::new();
-        let mut from = offset;
+        let mut from = 0;
         let mut in_string = false;
         for (i, ch) in text.chars().enumerate() {
+            println!("for char: {:#?}, text: {}", ch, text);
             // Is this the end of a string?
             if in_string {
+                println!("in_string: {:#?}, from: {}, tokens: {}", ch, from, tokens.len());
                 if ch == '"' {
+                    in_string = false;
                     tokens.push_back(Token {
-                        loc: Location::new(line, from, i - from),
-                        data: TokenData::Identifier(text.substring(from, i - from)),
+                        loc: Location::new(line, from + offset, i - from),
+                        data: TokenData::StringContents(text.substring(from, i)),
                     });
                     from = i + 1
                 }
@@ -505,10 +468,6 @@ impl<'a> Parser<'a> {
             // Is it the start of a string?
             if ch == '"' {
                 in_string = true;
-                tokens.push_back(Token {
-                    loc: Location::new(line, from, i - from),
-                    data: TokenData::StringContents(text.substring(from, i)),
-                });
                 from = i + 1;
                 continue;
             }
@@ -523,17 +482,19 @@ impl<'a> Parser<'a> {
                 found_token = Some(TokenData::CloseParen);
             }
             if let Some(token_data) = found_token {
+                println!("found token : {:#?}", &token_data);
                 if from < i {
                     tokens.push_back(Token {
-                        loc: Location::new(line, from, i - from),
+                        loc: Location::new(line, from + offset, i - from),
                         data: TokenData::Identifier(text.substring(from, i)),
                     });
                 }
                 tokens.push_back(Token {
-                    loc: Location::new(line, from, 1),
+                    loc: Location::new(line, from + offset, 1),
                     data: token_data,
                 });
                 from = i + 1;
+                println!("after found_token: {:#?}, from: {}", tokens, from);
                 continue;
             }
 
@@ -541,7 +502,7 @@ impl<'a> Parser<'a> {
             if ch == ' ' || ch == '\t' {
                 if from < i {
                     tokens.push_back(Token {
-                        loc: Location::new(line, from, i - from),
+                        loc: Location::new(line, from + offset, i - from),
                         data: TokenData::Identifier(text.substring(from, i)),
                     });
                 }
@@ -550,6 +511,7 @@ impl<'a> Parser<'a> {
 
             // Only (valid) option left: we are inside an identifier.
             if ch.is_alphanumeric() {
+                println!("for letter: {:#?}, from: {}", ch, from);
                 continue;
             }
 
@@ -563,8 +525,8 @@ impl<'a> Parser<'a> {
         // Close any trailing identifiers.
         if from < text.len() {
             tokens.push_back(Token {
-                loc: Location::new(line, from, text.len() - from),
-                data: TokenData::Identifier(text.substring(from, text.len() - from)),
+                loc: Location::new(line, from + offset, text.len() - from),
+                data: TokenData::Identifier(text.substring(from, text.len())),
             });
         }
 
@@ -588,10 +550,18 @@ impl<'a> Parser<'a> {
         is_start: bool,
         mut tokens: VecDeque<Token<'a>>,
     ) -> Result<Decl<'a>, Error> {
-        // Since we have already parsed the method name token, it is possible for there to be no tokens
-        // left if we have a no-argument declaration. If so, we can just exit right here.
+        // Since we have already parsed the method name token, it is possible for there to be no
+        // tokens left if we have a no-argument declaration. If so, we can just exit right here.
         let mut loc = match tokens.pop_front() {
-            None => return Ok(Decl::new(DeclData::Start(None), method_token.loc)),
+            None => {
+                return Ok(Decl::new(
+                    match is_start {
+                        true => DeclData::Start(None),
+                        false => DeclData::End(None),
+                    },
+                    method_token.loc,
+                ))
+            }
             Some(token) => match token.data {
                 TokenData::OpenParen => method_token.loc.concat(token.loc),
                 _ => {
@@ -623,7 +593,13 @@ impl<'a> Parser<'a> {
                         ParseErrorKind::UnnecessaryParens,
                         token.loc,
                     ));
-                    return Ok(Decl::new(DeclData::Start(None), loc.concat(token.loc)));
+                    return Ok(Decl::new(
+                        match is_start {
+                            true => DeclData::Start(None),
+                            false => DeclData::End(None),
+                        },
+                        loc.concat(token.loc),
+                    ));
                 }
                 _ => {
                     self.errs
@@ -717,8 +693,8 @@ impl<'a> Parser<'a> {
                     ));
                     return Err(anyhow!("unexpected token"));
                 }
-                // File paths may be optionally quoted, so either an `Identifier` or a `StringContents`
-                // is acceptable here.
+                // File paths may be optionally quoted, so either an `Identifier` or a
+                // `StringContents` is acceptable here.
                 TokenData::Identifier(contents) | TokenData::StringContents(contents) => {
                     File::new(Path::new(contents), token.loc)
                 }
@@ -731,7 +707,8 @@ impl<'a> Parser<'a> {
         };
 
         // Parse the token after the mandatory file path. If it's a comma, assume we are parsing a
-        // two-argument variant. If its a closing paren, assume it's the one-argument variant instead.
+        // two-argument variant. If its a closing paren, assume it's the one-argument variant
+        // instead.
         loc.concat(file.loc);
         loc = match tokens.pop_front() {
             None => {
@@ -825,26 +802,93 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// A declaration and its source line, useful together for error reporting.
+/// A `ParsedSpec` defines a single `Start...End` block. All names and line numbers are relative to
+/// the new state, not that of the commit being diffed against.
+struct ParsedSpecBuilder<'a> {
+    pub file: PathBuf,
+    pub tag: Option<Name<'a>>,
+    pub block_start_line: NonZeroUsize,
+    pub last_decl_line: NonZeroUsize,
+    pub links: BTreeSet<ParsedLink<'a>>,
+}
+
+impl<'a> ParsedSpecBuilder<'a> {
+    pub fn start(file: PathBuf, tag: Option<Name<'a>>, loc: Location<'a>) -> ParsedSpecBuilder<'a> {
+        ParsedSpecBuilder {
+            file,
+            tag,
+            block_start_line: loc.line.num,
+            last_decl_line: loc.line.num,
+            links: BTreeSet::new(),
+        }
+    }
+
+    pub fn with(&mut self, file: File<'a>, tag: Option<Name<'a>>, loc: Location<'a>) {
+        self.links.insert(ParsedLink { file, tag });
+        self.last_decl_line = loc.line.num;
+    }
+
+    pub fn end(
+        self,
+        tag: Option<Name<'a>>,
+        loc: Location<'a>,
+    ) -> Result<ParsedSpec<'a>, ParseError<'a>> {
+        // TODO: check that tags on start and end match.
+        // TODO: check that content portion is not empty.
+        Ok(ParsedSpec {
+            file: self.file,
+            tag: self.tag,
+            block: self.block_start_line..(loc.line.num.checked_add(1).unwrap()),
+            content: (self.last_decl_line.checked_add(1).unwrap())..loc.line.num,
+            links: self.links,
+        })
+    }
+}
+
+/// The "unwrapped" portion of a single comment line. For example, in a Rust file, the `-` parts
+/// below are the "wrapper" (ie, a common set of marking characters identifying a line relevant to
+/// this application), while the `^` parts are the parsable segment, which contains a single
+/// statement relevant to `ChangeTogether`:
+///
+///   // ![[ChangeTogether.Start(myCoolTag)]]
+///   ---------------------^^^^^^^^^^^^^^^^--
+///
+#[derive(Copy, Clone, Debug)]
+struct ParsableLineSegment<'a> {
+    pub text: &'a str,
+    pub pos: usize,
+}
+
+/// A declaration (ie, the variable part of the `ChangeTogether` statement) and its source line,
+/// useful together for error reporting.
+#[derive(Debug)]
 struct Decl<'a> {
     /// Refers to the position of the `.` in the `line`.
     pub loc: Location<'a>,
     pub data: DeclData<'a>,
 }
 
-/// A parsed declaration. In other words, the full parsing of a single parsable segment.
 impl<'a> Decl<'a> {
     fn new(data: DeclData<'a>, loc: Location<'a>) -> Decl<'a> {
         Decl { data, loc }
     }
 }
 
+#[derive(Debug)]
 enum DeclData<'a> {
     Start(Option<Name<'a>>),
     With(File<'a>, Option<Name<'a>>),
     End(Option<Name<'a>>),
 }
 
+/// A single discrete grammatical element inside the parsable segment of a line.
+#[derive(Debug)]
+struct Token<'a> {
+    pub loc: Location<'a>,
+    pub data: TokenData<'a>,
+}
+
+#[derive(Debug)]
 enum TokenData<'a> {
     Identifier(&'a str),
     OpenParen,
@@ -853,11 +897,359 @@ enum TokenData<'a> {
     Comma,
 }
 
-/// A single discrete grammatical element inside the parsable segment of a line.
-struct Token<'a> {
-    pub loc: Location<'a>,
-    pub data: TokenData<'a>,
-}
-
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use anyhow::anyhow;
+    use git2::Repository;
+    use std::collections::BTreeSet;
+    use std::num::NonZeroUsize;
+    use std::{collections::HashMap, error::Error as Err};
+    use tempfile::TempDir;
+
+    use crate::common::BlobFile;
+    use crate::errors::ParseError;
+    use crate::parser::ParsedLink;
+    use crate::testing::helpers::create_test_file_blob;
+
+    use super::{ParsedSpec, Parser};
+
+    const FILE_EXT_MD: &'static str = "test.md";
+    const FILE_EXT_PY: &'static str = "test.py";
+    const FILE_EXT_RS: &'static str = "test.rs";
+
+    // TODO: figure this out and make tests less repetitive
+    // type ParseTestCallback<'a> = dyn Fn(Result<Vec<ParsedSpec<'a>>, Vec<ParseError<'a>>>) -> Result<(), Box<dyn Err>> + 'a;
+
+    // fn parser_test_without_ignoring<'a>(
+    //     file_name: &'static str,
+    //     content: &'static str,
+    //     cb: Box<ParseTestCallback<'a>>,
+    // ) -> Result<(), Box<dyn Err>> {
+    //     let dir = TempDir::new()?;
+    //     let repo = Repository::init(dir.path())?;
+    //     let oids_to_blob_files = create_test_file_blob(&dir, &repo, file_name, content)?;
+    //     let ignoring = BTreeSet::new();
+
+    //     Parser::new(&oids_to_blob_files).parse(&ignoring);
+    //     Ok(())
+    // }
+
+    fn to_non_zero_range(range: std::ops::Range<usize>) -> std::ops::Range<NonZeroUsize> {
+        NonZeroUsize::new(range.start).unwrap()..NonZeroUsize::new(range.end).unwrap()
+    }
+
+    #[test]
+    fn test_good_no_blocks() -> Result<(), Box<dyn Err>> {
+        let dir = TempDir::new()?;
+        let repo = Repository::init(dir.path())?;
+
+        let oids_to_blob_files = create_test_file_blob(
+            &dir,
+            &repo,
+            FILE_EXT_RS,
+            "
+        // ...
+        // Line below is tricky, but should not match
+        // ChangeTogether
+        // ...
+",
+        )?;
+        let ignoring = BTreeSet::new();
+
+        match Parser::new(&oids_to_blob_files).parse(&ignoring) {
+            Ok(specs) => {
+                assert_eq!(specs.len(), 0);
+                Ok(())
+            }
+            Err(errs) => Err(anyhow!("unexpected errors: {:#?}", errs).into()),
+        }
+    }
+
+    #[test]
+    fn test_good_full_file_anonymous_block() -> Result<(), Box<dyn Err>> {
+        let dir = TempDir::new()?;
+        let repo = Repository::init(dir.path())?;
+
+        let oids_to_blob_files = create_test_file_blob(
+            &dir,
+            &repo,
+            FILE_EXT_RS,
+            "
+        // ![[ChangeTogether.Start]]
+        // ...
+        // ![[ChangeTogether.End]]
+",
+        )?;
+        let ignoring = BTreeSet::new();
+
+        match Parser::new(&oids_to_blob_files).parse(&ignoring) {
+            Ok(specs) => {
+                assert_eq!(specs.len(), 1);
+
+                let spec = &specs[0];
+                assert_eq!(spec.file.ends_with(FILE_EXT_RS), true);
+                assert_eq!(spec.block, to_non_zero_range(2..5));
+                assert_eq!(spec.content, to_non_zero_range(3..4));
+                assert_eq!(spec.tag.is_none(), true);
+                assert_eq!(spec.links.is_empty(), true);
+                Ok(())
+            }
+            Err(errs) => Err(anyhow!("unexpected errors: {:#?}", errs).into()),
+        }
+    }
+
+    #[test]
+    fn test_good_full_file_named_block() -> Result<(), Box<dyn Err>> {
+        let dir = TempDir::new()?;
+        let repo = Repository::init(dir.path())?;
+
+        let oids_to_blob_files = create_test_file_blob(
+            &dir,
+            &repo,
+            FILE_EXT_RS,
+            "
+        // ![[ChangeTogether.Start(myTag)]]
+        // ...
+        // ![[ChangeTogether.End(myTag)]]
+",
+        )?;
+        let ignoring = BTreeSet::new();
+
+        match Parser::new(&oids_to_blob_files).parse(&ignoring) {
+            Ok(specs) => {
+                assert_eq!(specs.len(), 1);
+
+                let spec = &specs[0];
+                assert_eq!(spec.file.ends_with(FILE_EXT_RS), true);
+                assert_eq!(spec.block, to_non_zero_range(2..5));
+                assert_eq!(spec.content, to_non_zero_range(3..4));
+                assert_eq!(spec.tag.as_ref().unwrap().text, "myTag");
+                assert_eq!(spec.links.is_empty(), true);
+                Ok(())
+            }
+            Err(errs) => Err(anyhow!("unexpected errors: {:#?}", errs).into()),
+        }
+    }
+
+    #[test]
+    fn test_good_block_with_file_links() -> Result<(), Box<dyn Err>> {
+        let dir = TempDir::new()?;
+        let repo = Repository::init(dir.path())?;
+
+        let oids_to_blob_files = create_test_file_blob(
+            &dir,
+            &repo,
+            FILE_EXT_RS,
+            r##"
+        // ![[ChangeTogether.Start]]
+        // ![[ChangeTogether.With("/foo/bar.rs")]]
+        // ![[ChangeTogether.With("/baz/qux.rs")]]
+        fn main() {
+            println!("Hello World!");
+        }
+        // ![[ChangeTogether.End]]
+"##,
+        )?;
+        let ignoring = BTreeSet::new();
+
+        match Parser::new(&oids_to_blob_files).parse(&ignoring) {
+            Ok(specs) => {
+                assert_eq!(specs.len(), 1);
+
+                let spec = &specs[0];
+                assert_eq!(spec.file.ends_with(FILE_EXT_RS), true);
+                assert_eq!(spec.block, to_non_zero_range(2..9));
+                assert_eq!(spec.content, to_non_zero_range(5..8));
+                assert_eq!(spec.tag.is_none(), true);
+                assert_eq!(spec.links.len(), 2);
+
+                let links: Vec<&ParsedLink> = spec.links.iter().clone().collect();
+                let link0 = links[0];
+                assert_eq!(link0.file.path.as_os_str(), "/foo/bar.rs");
+                assert_eq!(link0.tag.is_none(), true);
+                let link1 = links[1];
+                assert_eq!(link1.file.path.as_os_str(), "/baz/qux.rs");
+                assert_eq!(link1.tag.is_none(), true);
+                Ok(())
+            }
+            Err(errs) => Err(anyhow!("unexpected errors: {:#?}", errs).into()),
+        }
+    }
+
+    #[test]
+    fn test_good_block_with_file_links_tricky_chars() -> Result<(), Box<dyn Err>> {
+        let dir = TempDir::new()?;
+        let repo = Repository::init(dir.path())?;
+
+        let oids_to_blob_files = create_test_file_blob(
+            &dir,
+            &repo,
+            FILE_EXT_RS,
+            r##"
+        // ![[ChangeTogether.Start]]
+        // ![[ChangeTogether.With("/foo/bar(![[]],).rs")]]
+        // ![[ChangeTogether.With("/baz/qux(![[]],).rs")]]
+        fn main() {
+            println!("Hello World!");
+        }
+        // ![[ChangeTogether.End]]
+"##,
+        )?;
+        let ignoring = BTreeSet::new();
+
+        match Parser::new(&oids_to_blob_files).parse(&ignoring) {
+            Ok(specs) => {
+                assert_eq!(specs.len(), 1);
+
+                let spec = &specs[0];
+                assert_eq!(spec.file.ends_with(FILE_EXT_RS), true);
+                assert_eq!(spec.block, to_non_zero_range(2..9));
+                assert_eq!(spec.content, to_non_zero_range(5..8));
+                assert_eq!(spec.tag.is_none(), true);
+                assert_eq!(spec.links.len(), 2);
+
+                let links: Vec<&ParsedLink> = spec.links.iter().clone().collect();
+                let link0 = links[0];
+                assert_eq!(link0.file.path.as_os_str(), "/foo/bar(![[]],).rs");
+                assert_eq!(link0.tag.is_none(), true);
+                let link1 = links[1];
+                assert_eq!(link1.file.path.as_os_str(), "/baz/qux(![[]],).rs");
+                assert_eq!(link1.tag.is_none(), true);
+                Ok(())
+            }
+            Err(errs) => Err(anyhow!("unexpected errors: {:#?}", errs).into()),
+        }
+    }
+
+    #[test]
+    fn test_good_block_with_file_and_tag_links() -> Result<(), Box<dyn Err>> {
+        let dir = TempDir::new()?;
+        let repo = Repository::init(dir.path())?;
+
+        let oids_to_blob_files = create_test_file_blob(
+            &dir,
+            &repo,
+            FILE_EXT_RS,
+            r##"
+        // ![[ChangeTogether.Start]]
+        // ![[ChangeTogether.With("/foo/bar.rs",tagA)]]
+        // ![[ChangeTogether.With("/baz/qux.rs",tagB)]]
+        fn main() {
+            println!("Hello World!");
+        }
+        // ![[ChangeTogether.End]]
+"##,
+        )?;
+        let ignoring = BTreeSet::new();
+
+        match Parser::new(&oids_to_blob_files).parse(&ignoring) {
+            Ok(specs) => {
+                assert_eq!(specs.len(), 1);
+
+                let spec = &specs[0];
+                assert_eq!(spec.file.ends_with(FILE_EXT_RS), true);
+                assert_eq!(spec.block, to_non_zero_range(2..9));
+                assert_eq!(spec.content, to_non_zero_range(5..8));
+                assert_eq!(spec.tag.is_none(), true);
+
+                let links: Vec<&ParsedLink> = spec.links.iter().clone().collect();
+                let link0 = links[0];
+                assert_eq!(link0.file.path.as_os_str(), "/foo/bar.rs");
+                assert_eq!(link0.tag.as_ref().unwrap().text, "tagA");
+
+                let link1 = links[1];
+                assert_eq!(link1.file.path.as_os_str(), "/baz/qux.rs");
+                assert_eq!(link1.tag.as_ref().unwrap().text, "tagB");
+                Ok(())
+            }
+            Err(errs) => Err(anyhow!("unexpected errors: {:#?}", errs).into()),
+        }
+    }
+
+    #[test]
+    fn test_good_md_file() -> Result<(), Box<dyn Err>> {
+        let dir = TempDir::new()?;
+        let repo = Repository::init(dir.path())?;
+
+        let oids_to_blob_files = create_test_file_blob(
+            &dir,
+            &repo,
+            FILE_EXT_MD,
+            r##"
+        <!-- ![[ChangeTogether.Start]] -->
+        <!-- ![[ChangeTogether.With("/foo/bar.rs",tagA)]] -->
+        <!-- ![[ChangeTogether.With("/baz/qux.rs",tagB)]] -->
+        # This is my markdown file
+        ...
+        <!-- ![[ChangeTogether.End]] -->
+"##,
+        )?;
+        let ignoring = BTreeSet::new();
+
+        match Parser::new(&oids_to_blob_files).parse(&ignoring) {
+            Ok(specs) => {
+                assert_eq!(specs.len(), 1);
+
+                let spec = &specs[0];
+                assert_eq!(spec.file.ends_with(FILE_EXT_MD), true);
+                assert_eq!(spec.block, to_non_zero_range(2..8));
+                assert_eq!(spec.content, to_non_zero_range(5..7));
+                assert_eq!(spec.tag.is_none(), true);
+
+                let links: Vec<&ParsedLink> = spec.links.iter().clone().collect();
+                let link0 = links[0];
+                assert_eq!(link0.file.path.as_os_str(), "/foo/bar.rs");
+                assert_eq!(link0.tag.as_ref().unwrap().text, "tagA");
+
+                let link1 = links[1];
+                assert_eq!(link1.file.path.as_os_str(), "/baz/qux.rs");
+                assert_eq!(link1.tag.as_ref().unwrap().text, "tagB");
+                Ok(())
+            }
+            Err(errs) => Err(anyhow!("unexpected errors: {:#?}", errs).into()),
+        }
+    }
+
+    #[test]
+    fn test_good_py_file() -> Result<(), Box<dyn Err>> {
+        let dir = TempDir::new()?;
+        let repo = Repository::init(dir.path())?;
+
+        let oids_to_blob_files = create_test_file_blob(
+            &dir,
+            &repo,
+            FILE_EXT_PY,
+            r##"
+        # ![[ChangeTogether.Start]]
+        # ![[ChangeTogether.With("/foo/bar.rs",tagA)]]
+        # ![[ChangeTogether.With("/baz/qux.rs",tagB)]]
+        print("We are in python now")
+        # ![[ChangeTogether.End]]
+"##,
+        )?;
+        let ignoring = BTreeSet::new();
+
+        match Parser::new(&oids_to_blob_files).parse(&ignoring) {
+            Ok(specs) => {
+                assert_eq!(specs.len(), 1);
+
+                let spec = &specs[0];
+                assert_eq!(spec.file.ends_with(FILE_EXT_PY), true);
+                assert_eq!(spec.block, to_non_zero_range(2..7));
+                assert_eq!(spec.content, to_non_zero_range(5..6));
+                assert_eq!(spec.tag.is_none(), true);
+
+                let links: Vec<&ParsedLink> = spec.links.iter().clone().collect();
+                let link0 = links[0];
+                assert_eq!(link0.file.path.as_os_str(), "/foo/bar.rs");
+                assert_eq!(link0.tag.as_ref().unwrap().text, "tagA");
+
+                let link1 = links[1];
+                assert_eq!(link1.file.path.as_os_str(), "/baz/qux.rs");
+                assert_eq!(link1.tag.as_ref().unwrap().text, "tagB");
+                Ok(())
+            }
+            Err(errs) => Err(anyhow!("unexpected errors: {:#?}", errs).into()),
+        }
+    }
+}

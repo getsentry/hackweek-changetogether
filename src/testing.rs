@@ -1,18 +1,42 @@
 #[cfg(test)]
 pub(crate) mod helpers {
     use anyhow::{Context, Error};
-    use git2::{IndexEntry, IndexTime, Oid, Repository};
+    use git2::{IndexEntry, IndexTime, Oid, Repository, Blob};
     use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    use crate::common::BlobFile;
 
     pub(crate) struct TestCommit<'a> {
         pub msg: &'a str,
         pub files: HashMap<&'static str, &'static str>,
     }
 
-    /// Creates a repository with two commits in it.
-    pub(crate) fn create_test_repo(commits: &Vec<TestCommit>) -> Result<Repository, Error> {
+    /// Test against a custom git "file, represented as a blob. Useful for the parser. This function
+    /// will return a map with a single item in it.
+    pub(crate) fn create_test_file_blob<'a>(
+        dir: &TempDir,
+        repo: &'a Repository,
+        file_name: &'static str,
+        content: &'static str,
+    ) -> Result<HashMap<Oid, BlobFile<'a>>, Error> {
+        let file = dir.path().join(file_name).to_path_buf();
+        let oid = repo.blob(content.as_bytes())?;
+        let blob = repo.find_blob(oid)?;
+        let blob_file = BlobFile::new(file, blob);
+    
+        let mut oids_to_blob_files = HashMap::new();
+        oids_to_blob_files.insert(oid, blob_file);
+        Ok(oids_to_blob_files)
+    }
+
+    /// Creates a repository with N commits in it.
+    pub(crate) fn create_test_repo(
+        dir: &TempDir,
+        commits: &Vec<TestCommit>,
+    ) -> Result<Repository, Error> {
         let mut repo =
-            Repository::init_bare(":TESTING:").context("could not create in-memory repo")?;
+            Repository::init_bare(dir.path()).context("could not create in-memory repo")?;
         commits
             .into_iter()
             .try_for_each(|test_commit| create_test_commit(&mut repo, test_commit))?;
